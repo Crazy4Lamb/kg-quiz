@@ -106,7 +106,7 @@ export default function AdaptivePanel() {
                 <Space>
                   <Tag color="processing">{item.nodeName}</Tag>
                   <Progress percent={Math.round((item.mastery || 0) * 100)} size="small"
-                    strokeColor={(item.mastery || 0) < 0.4 ? '#ff4d4f' : (item.mastery || 0) >= 0.7 ? '#52c41a' : '#faad14'}
+                    strokeColor={(item.mastery || 0) < 0.4 ? 'var(--color-danger)' : (item.mastery || 0) >= 0.7 ? 'var(--color-success)' : 'var(--color-warning)'}
                     style={{ width: 120, marginBottom: 0 }} format={p => `掌握 ${p}%`} />
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>{item.reason}</Typography.Text>
                 </Space>
@@ -182,7 +182,7 @@ function MasteryInline({ studentId }) {
         <div key={n.nodeId} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
           <span style={{ width: 130, textAlign: 'right' }}>{n.nodeName}</span>
           <Progress percent={Math.round((n.mastery || 0) * 100)} size="small"
-            strokeColor={(n.mastery || 0) < 0.4 ? '#ff4d4f' : (n.mastery || 0) >= 0.7 ? '#52c41a' : '#faad14'} />
+            strokeColor={(n.mastery || 0) < 0.4 ? 'var(--color-danger)' : (n.mastery || 0) >= 0.7 ? 'var(--color-success)' : 'var(--color-warning)'} />
         </div>
       ))}
     </div>

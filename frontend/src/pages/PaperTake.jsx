@@ -201,7 +201,7 @@ export default function PaperTake() {
                       return (
                         <div key={i} style={{
                           padding: '2px 8px', borderRadius: 4,
-                          background: isRef ? '#f6ffed' : isMine ? '#fff7e6' : 'transparent'
+                          background: isRef ? 'var(--color-success-soft)' : isMine ? 'var(--color-warning-soft)' : 'transparent'
                         }}>
                           {isRef && <Tag color="green">正确答案</Tag>}
                           {isMine && !isRef && <Tag color="red">你选的</Tag>}

@@ -124,13 +124,13 @@ export default function GradingDesk() {
         <Col span={8}>
           <Card size="small">
             <Statistic title="待人工批改题数" value={pendingTotal}
-              valueStyle={{ color: pendingTotal > 0 ? '#fa8c16' : '#52c41a' }} />
+              valueStyle={{ color: pendingTotal > 0 ? 'var(--color-warning)' : 'var(--color-success)' }} />
           </Card>
         </Col>
         <Col span={8}>
           <Card size="small">
             <Statistic title="已批改定稿" value={subs.filter(s => s.status === 'GRADED').length}
-              suffix={`/ ${subs.length} 人`} valueStyle={{ color: '#52c41a' }} />
+              suffix={`/ ${subs.length} 人`} valueStyle={{ color: 'var(--color-success)' }} />
           </Card>
         </Col>
       </Row>
@@ -230,7 +230,7 @@ export default function GradingDesk() {
                       return (
                         <div key={i} style={{
                           padding: '2px 8px', borderRadius: 4,
-                          background: isRef ? '#f6ffed' : isMine ? '#fff7e6' : 'transparent'
+                          background: isRef ? 'var(--color-success-soft)' : isMine ? 'var(--color-warning-soft)' : 'transparent'
                         }}>
                           {isRef && <Tag color="green">答案</Tag>}
                           {isMine && !isRef && <Tag color="orange">学生选</Tag>}
@@ -273,7 +273,7 @@ export default function GradingDesk() {
                   <InputNumber min={0} max={full} step={0.5}
                     value={d.score} onChange={v => patch(q.questionId, 'score', v)}
                     style={{ width: 90 }} />
-                  <span style={{ color: '#999' }}>/ {full}</span>
+                  <span style={{ color: 'var(--color-muted)' }}>/ {full}</span>
                   <span style={{ marginLeft: 12 }}>评语：</span>
                   <Input value={d.comment} onChange={e => patch(q.questionId, 'comment', e.target.value)}
                     placeholder="选填，学生会看到" style={{ width: 380 }} />

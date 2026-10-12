@@ -7,7 +7,7 @@ import {
 import { AimOutlined, ReloadOutlined, PlayCircleOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { api, unwrap } from '../api.js';
 
-const masteryColor = (v) => (v >= 0.7 ? '#52c41a' : v >= 0.4 ? '#faad14' : '#ff4d4f');
+const masteryColor = (v) => (v >= 0.7 ? 'var(--color-success)' : v >= 0.4 ? 'var(--color-warning)' : 'var(--color-danger)');
 const pct = (v) => `${Math.round((Number(v) || 0) * 1000) / 10}%`;
 const LEVEL = {
   WEAK: { label: '待补强', color: 'red' },
@@ -197,7 +197,7 @@ export default function DiagnosisReport() {
                   renderItem={(r) => (
                     <List.Item>
                       <Space size={6}>
-                        <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                        <CheckCircleOutlined style={{ color: 'var(--color-success)' }} />
                         <span>{r.nodeName}</span>
                         <Typography.Text type="secondary" style={{ fontSize: 12 }}>{pct(r.rate)}</Typography.Text>
                       </Space>

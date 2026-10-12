@@ -242,8 +242,8 @@ export default function ContentManage() {
           </div>
           {overview && (
             <Typography.Text type="secondary">
-              共 {overview.total} 个知识点，其中 <b style={{ color: '#52c41a' }}>{overview.withContent}</b> 个已有内容，
-              <b style={{ color: '#fa8c16' }}> {overview.total - overview.withContent}</b> 个还没有
+              共 {overview.total} 个知识点，其中 <b style={{ color: 'var(--color-success)' }}>{overview.withContent}</b> 个已有内容，
+              <b style={{ color: 'var(--color-warning)' }}> {overview.total - overview.withContent}</b> 个还没有
             </Typography.Text>
           )}
         </Space>
@@ -332,7 +332,7 @@ export default function ContentManage() {
                     标题：{it.title}　　模型：{it.model || '—'}
                   </Typography.Text>
                   {it.summary && <Alert type="info" showIcon message={it.summary} />}
-                  <div style={{ maxHeight: 460, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 6, padding: 14, background: '#fff' }}>
+                  <div style={{ maxHeight: 460, overflow: 'auto', border: '1px solid var(--color-border)', borderRadius: 6, padding: 14, background: 'var(--color-surface)' }}>
                     <Markdown text={it.body} />
                   </div>
                 </Space>

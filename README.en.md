@@ -13,6 +13,7 @@ A teaching demo for administrators, teachers and students. It connects knowledge
 - Learning reports, incorrect-answer review, prerequisite gap analysis, learning paths and knowledge-point ranking.
 - Administrator, teacher and student roles with backend role and ownership checks.
 - Optional AI-assisted content generation and question recognition through a compatible API.
+- Five selectable color themes saved per browser, synchronized across login, workspace, dialogs and graphs.
 
 ## Architecture
 
@@ -115,3 +116,37 @@ Unavailable Qdrant or embeddings can fall back to keyword search. MySQL and Neo4
 Build the frontend with npm run build from frontend/. Run backend checks with mvn test from backend/. Root-level verification scripts may require running services, seeded data or machine-specific paths; inspect them first.
 
 The [historical Chinese development guide](docs/legacy-demo-guide.zh-CN.md) preserves detailed workflows and API examples, but its older architecture descriptions are superseded by these READMEs.
+
+## Illustrated User Guide
+
+### 1. Sign in and choose a theme
+
+![Login and theme selector](docs/images/login.png)
+
+Sign in as administrator, teacher or with a student account assigned by a teacher. The top-right theme button offers Dopamine, Peach, Mint, Sky and Midnight palettes. Your choice is saved in the current browser and applied across the login page and workspace.
+
+### 2. Edit a knowledge graph
+
+![Graph management workspace](docs/images/graphs.png)
+
+Administrators and teachers select a textbook/grade graph in Graph Management (图谱管理), then choose Edit Graph (编辑图谱). An empty database offers a sample-data import; existing installations can use their current graphs.
+
+![Knowledge points and relationship editor](docs/images/editor.png)
+
+- Drag nodes, then click Save Layout (保存布局).
+- Double-click a node to edit it; drag between connection handles to create relationships.
+- Click an edge to adjust its containment, similarity or prerequisite type/direction.
+- Select a node and use Related Add (关联新增), or import an indented outline with Bulk Import (批量导入).
+
+### 3. Complete a teaching cycle
+
+| Role | Action | Outcome |
+|---|---|---|
+| Administrator / teacher | Create a student, select a textbook and assign an account | A personal knowledge graph is created |
+| Teacher | Add questions and link knowledge points | Content is ready for practice and papers |
+| Teacher | Generate adaptive practice or publish a paper to selected students | Students receive assignments |
+| Student | Open My Assignments (我的作业), answer and submit | Automatic scoring runs |
+| Teacher | Review subjective answers and finalize grades | Students see final scores and comments |
+| Teacher / student | Review learning reports and incorrect answers | Continue targeted practice |
+
+Screenshots show the current application and a mathematics demo graph, without real student records.

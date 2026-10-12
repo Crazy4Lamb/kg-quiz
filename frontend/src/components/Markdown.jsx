@@ -26,7 +26,7 @@ function inline(text, keyPrefix) {
     } else if (token.startsWith('`')) {
       out.push(
         <code key={key} style={{
-          background: '#f5f5f5', padding: '1px 5px', borderRadius: 4,
+          background: 'var(--color-soft)', padding: '1px 5px', borderRadius: 4,
           fontSize: 13, fontFamily: 'ui-monospace, Consolas, monospace'
         }}>{token.slice(1, -1)}</code>
       );
@@ -96,8 +96,8 @@ export default function Markdown({ text, compact = false }) {
           fontWeight: level <= 2 ? 700 : 600,
           margin: level <= 2 ? '18px 0 8px' : '14px 0 6px',
           paddingBottom: level <= 2 ? 6 : 0,
-          borderBottom: level <= 2 ? '1px solid #f0f0f0' : 'none',
-          color: '#141414'
+          borderBottom: level <= 2 ? '1px solid var(--color-border)' : 'none',
+          color: 'var(--color-text)'
         }}>{inline(heading[2], `h${key}`)}</div>
       );
       continue;
@@ -105,7 +105,7 @@ export default function Markdown({ text, compact = false }) {
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
       flushPara();
       flushList();
-      blocks.push(<div key={`hr${key++}`} style={{ borderTop: '1px solid #f0f0f0', margin: '16px 0' }} />);
+      blocks.push(<div key={`hr${key++}`} style={{ borderTop: '1px solid var(--color-border)', margin: '16px 0' }} />);
       continue;
     }
     const quote = /^>\s?(.*)$/.exec(trimmed);
@@ -114,8 +114,8 @@ export default function Markdown({ text, compact = false }) {
       flushList();
       blocks.push(
         <div key={`q${key++}`} style={{
-          borderLeft: '3px solid #d9d9d9', background: '#fafafa',
-          padding: '6px 12px', margin: '10px 0', color: '#595959', fontSize: 13
+          borderLeft: '3px solid var(--color-border)', background: 'var(--color-background)',
+          padding: '6px 12px', margin: '10px 0', color: 'var(--color-muted)', fontSize: 13
         }}>{inline(quote[1], `q${key}`)}</div>
       );
       continue;

@@ -20,9 +20,9 @@ const LEVEL_COLOR = { 已掌握: 'green', 掌握中: 'orange', 薄弱: 'red', �
 
 function masteryColor(m) {
   const v = Number(m) || 0;
-  if (v < 0.4) return '#ff4d4f';
-  if (v < 0.7) return '#faad14';
-  return '#52c41a';
+  if (v < 0.4) return 'var(--color-danger)';
+  if (v < 0.7) return 'var(--color-warning)';
+  return 'var(--color-success)';
 }
 
 function MasteryNode({ data }) {
@@ -30,7 +30,7 @@ function MasteryNode({ data }) {
   return (
     <div style={{
       padding: '8px 12px', borderRadius: 8, minWidth: 90, textAlign: 'center',
-      background: '#fff', border: `2px solid ${color}`, boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+      background: 'var(--color-surface)', border: `2px solid ${color}`, boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
       fontSize: 12
     }}>
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
@@ -65,19 +65,19 @@ function TrendChart({ data = [] }) {
           const y = h - padY - v * (h - padY * 2);
           return (
             <g key={v}>
-              <line x1={padX} y1={y} x2={w - padX} y2={y} stroke="#f0f0f0" />
-              <text x={4} y={y + 4} fontSize={10} fill="#bfbfbf">{v * 100}%</text>
+              <line x1={padX} y1={y} x2={w - padX} y2={y} stroke="var(--color-border)" />
+              <text x={4} y={y + 4} fontSize={10} fill="var(--color-muted)">{v * 100}%</text>
             </g>
           );
         })}
-        <polyline points={line} fill="none" stroke="#1677ff" strokeWidth={2} />
+        <polyline points={line} fill="none" stroke="var(--color-primary)" strokeWidth={2} />
         {pts.map(([x, y], i) => (
           <g key={i}>
-            <circle cx={x} cy={y} r={4} fill="#fff" stroke="#1677ff" strokeWidth={2} />
-            <text x={x} y={y - 10} fontSize={10} fill="#1677ff" textAnchor="middle">
+            <circle cx={x} cy={y} r={4} fill="var(--color-surface)" stroke="var(--color-primary)" strokeWidth={2} />
+            <text x={x} y={y - 10} fontSize={10} fill="var(--color-primary)" textAnchor="middle">
               {Math.round((data[i].accuracy || 0) * 100)}%
             </text>
-            <text x={x} y={h - 8} fontSize={10} fill="#8c8c8c" textAnchor="middle">
+            <text x={x} y={h - 8} fontSize={10} fill="var(--color-muted)" textAnchor="middle">
               {String(data[i].createdAt || '').slice(5, 16).replace('T', ' ')}
             </text>
           </g>
@@ -162,7 +162,7 @@ export default function StudentGraphView({ fixedStudentId }) {
     source: String(rel.fromNodeId),
     target: String(rel.toNodeId),
     label: RELATION_LABEL[rel.relationType] || rel.relationType,
-    style: { stroke: '#bfbfbf' }
+    style: { stroke: 'var(--color-muted)' }
   })), [data]);
 
   if (loading) return <Card loading style={{ height: '70vh' }} />;
@@ -228,8 +228,8 @@ export default function StudentGraphView({ fixedStudentId }) {
       <AnalysisPanel studentId={id} nodes={data.nodes} />
 
       <div style={{
-        height: 'calc(100vh - 420px)', minHeight: 320, background: '#fff',
-        borderRadius: 8, border: '1px solid #eee'
+        height: 'calc(100vh - 420px)', minHeight: 320, background: 'var(--color-surface)',
+        borderRadius: 8, border: '1px solid var(--color-border)'
       }}>
         <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView
           nodesConnectable={false} elementsSelectable={true}>
@@ -250,9 +250,9 @@ export default function StudentGraphView({ fixedStudentId }) {
               <Col span={4}><Statistic title="平均掌握度" value={(ov.avgMastery * 100).toFixed(1)} suffix="%" /></Col>
               <Col span={4}><Statistic title="加权掌握度" value={(ov.weightedMastery * 100).toFixed(1)} suffix="%" /></Col>
               <Col span={4}><Statistic title="答题正确率" value={(ov.accuracy * 100).toFixed(1)} suffix="%" /></Col>
-              <Col span={4}><Statistic title="已掌握 / 总" value={`${ov.mastered}/${ov.nodeTotal}`} styles={{ content: { color: '#52c41a' } }} /></Col>
-              <Col span={4}><Statistic title="薄弱" value={ov.weak} styles={{ content: { color: '#ff4d4f' } }} /></Col>
-              <Col span={4}><Statistic title="错题" value={report.wrongTotal} styles={{ content: { color: '#ff4d4f' } }} /></Col>
+              <Col span={4}><Statistic title="已掌握 / 总" value={`${ov.mastered}/${ov.nodeTotal}`} styles={{ content: { color: 'var(--color-success)' } }} /></Col>
+              <Col span={4}><Statistic title="薄弱" value={ov.weak} styles={{ content: { color: 'var(--color-danger)' } }} /></Col>
+              <Col span={4}><Statistic title="错题" value={report.wrongTotal} styles={{ content: { color: 'var(--color-danger)' } }} /></Col>
             </Row>
 
             <Divider style={{ margin: '16px 0 8px' }}>历次练习得分率</Divider>
@@ -266,7 +266,7 @@ export default function StudentGraphView({ fixedStudentId }) {
                     message={<Space>
                       <span>{a.nodeName}</span>
                       <Tag color={LEVEL_COLOR[a.level]}>{a.level}</Tag>
-                      <span style={{ color: '#8c8c8c', fontSize: 12 }}>
+                      <span style={{ color: 'var(--color-muted)', fontSize: 12 }}>
                         掌握度 {(Number(a.mastery) * 100).toFixed(0)}%
                       </span>
                     </Space>}
@@ -353,7 +353,7 @@ export default function StudentGraphView({ fixedStudentId }) {
                     {w.options?.length > 0 && (
                       <ol style={{ paddingLeft: 20, margin: '0 0 8px' }}>
                         {w.options.map((o, oi) => (
-                          <li key={oi} style={{ color: o === w.answer ? '#52c41a' : undefined }}>{o}</li>
+                          <li key={oi} style={{ color: o === w.answer ? 'var(--color-success)' : undefined }}>{o}</li>
                         ))}
                       </ol>
                     )}
@@ -363,7 +363,7 @@ export default function StudentGraphView({ fixedStudentId }) {
                       （共作答 {w.attemptCount} 次，答错 {w.wrongCount} 次）
                     </div>
                     {w.analysis && (
-                      <div style={{ marginTop: 8, color: '#595959' }}>
+                      <div style={{ marginTop: 8, color: 'var(--color-muted)' }}>
                         解析：{w.analysis}
                       </div>
                     )}

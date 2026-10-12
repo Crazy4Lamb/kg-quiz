@@ -34,7 +34,7 @@ export default function MyAssignments() {
       extra={<Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>}>
       {todo > 0 && (
         <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-          有 <b style={{ color: '#fa8c16' }}>{todo}</b> 份作业还没做，点「去作答」开始。
+          有 <b style={{ color: 'var(--color-warning)' }}>{todo}</b> 份作业还没做，点「去作答」开始。
         </Typography.Paragraph>
       )}
       {rows.length === 0 ? (

@@ -10,10 +10,10 @@ A teaching demo for administrators, teachers and students. It connects knowledge
 
 ## 使用说明 / User Guides
 
-- [中文说明（独立文档）](README.zh-CN.md)
-- [English guide (separate document)](README.en.md)
+- [中文说明](README.zh-CN.md)
+- [English guide](README.en.md)
 
-下方提供完整的中文和英文说明。 / Complete Chinese and English instructions are included below.
+下方提供完整的中文和英文说明与实际界面截图。 / Full guides and actual screenshots follow.
 
 ---
 
@@ -27,6 +27,7 @@ A teaching demo for administrators, teachers and students. It connects knowledge
 - **学习分析**：学情报告、错题本、前置缺口分析、学习路径推荐与核心知识点排序。
 - **角色权限**：管理员管理账号及系统，教师管理教学，学生访问自己的学习数据；后端校验角色与数据归属。
 - **可选 AI**：通过兼容接口辅助内容生成与题目识别。
+- **多主题界面**：右上角可切换活力多巴胺、蜜桃派对、薄荷花园、晴空蓝与霓虹夜色；选择自动保存在当前浏览器，登录页、工作台、弹窗与图谱同步换色。
 
 ## 当前架构
 
@@ -132,6 +133,40 @@ start-*.bat    原开发电脑的 Windows 启动脚本
 
 [历史开发说明](docs/legacy-demo-guide.zh-CN.md)保留详细流程与接口示例，其中旧架构描述不应作为当前部署依据。
 
+## 图解使用说明
+
+### 1. 登录与选择主题
+
+![登录与主题入口](docs/images/login.png)
+
+使用管理员、教师或老师分配的学生账号登录。右上角的主题按钮可选择活力多巴胺、蜜桃派对、薄荷花园、晴空蓝、霓虹夜色，选择保存在当前浏览器，登录页和工作台同步换色。
+
+### 2. 管理知识图谱
+
+![图谱管理工作台](docs/images/graphs.png)
+
+管理员或教师在「图谱管理」中按教材与年级选择图谱，点击「编辑图谱」。空库可通过「导入示例数据」体验；已有教学数据时可直接使用现有图谱。
+
+![知识点与关系编辑](docs/images/editor.png)
+
+- 拖动知识点调整位置，点击「保存布局」保存。
+- 双击节点编辑属性；从节点连接点拖线建立关系。
+- 点击连线调整包含、相近或前置关系及方向。
+- 选中节点后用「关联新增」补充知识点；「批量导入」可粘贴缩进大纲。
+
+### 3. 完成一次教学闭环
+
+| 角色 | 操作 | 结果 |
+|---|---|---|
+| 管理员 / 教师 | 新建学生，选择教材并创建账号 | 生成学生个人知识图谱 |
+| 教师 | 维护题库并关联知识点 | 为练习与组卷准备题目 |
+| 教师 | 在出题中心自适应出题，或组卷并定向发布 | 学生收到练习或作业 |
+| 学生 | 打开「我的作业」，作答并提交 | 系统执行自动评分 |
+| 教师 | 在批改台复核主观题并定稿 | 学生查看最终评分与评语 |
+| 教师 / 学生 | 查看「我的学习」、学情报告和错题本 | 按薄弱点继续练习 |
+
+截图来自当前项目界面；展示的是数学演示图谱，不包含真实学生记录。
+
 ---
 
 # English Guide
@@ -145,6 +180,7 @@ start-*.bat    原开发电脑的 Windows 启动脚本
 - Learning reports, incorrect-answer review, prerequisite gap analysis, learning paths and knowledge-point ranking.
 - Administrator, teacher and student roles with backend role and ownership checks.
 - Optional AI-assisted content generation and question recognition through a compatible API.
+- Five selectable color themes saved per browser, synchronized across login, workspace, dialogs and graphs.
 
 ## Architecture
 
@@ -247,3 +283,37 @@ Unavailable Qdrant or embeddings can fall back to keyword search. MySQL and Neo4
 Build the frontend with npm run build from frontend/. Run backend checks with mvn test from backend/. Root-level verification scripts may require running services, seeded data or machine-specific paths; inspect them first.
 
 The [historical Chinese development guide](docs/legacy-demo-guide.zh-CN.md) preserves detailed workflows and API examples, but its older architecture descriptions are superseded by these READMEs.
+
+## Illustrated User Guide
+
+### 1. Sign in and choose a theme
+
+![Login and theme selector](docs/images/login.png)
+
+Sign in as administrator, teacher or with a student account assigned by a teacher. The top-right theme button offers Dopamine, Peach, Mint, Sky and Midnight palettes. Your choice is saved in the current browser and applied across the login page and workspace.
+
+### 2. Edit a knowledge graph
+
+![Graph management workspace](docs/images/graphs.png)
+
+Administrators and teachers select a textbook/grade graph in Graph Management (图谱管理), then choose Edit Graph (编辑图谱). An empty database offers a sample-data import; existing installations can use their current graphs.
+
+![Knowledge points and relationship editor](docs/images/editor.png)
+
+- Drag nodes, then click Save Layout (保存布局).
+- Double-click a node to edit it; drag between connection handles to create relationships.
+- Click an edge to adjust its containment, similarity or prerequisite type/direction.
+- Select a node and use Related Add (关联新增), or import an indented outline with Bulk Import (批量导入).
+
+### 3. Complete a teaching cycle
+
+| Role | Action | Outcome |
+|---|---|---|
+| Administrator / teacher | Create a student, select a textbook and assign an account | A personal knowledge graph is created |
+| Teacher | Add questions and link knowledge points | Content is ready for practice and papers |
+| Teacher | Generate adaptive practice or publish a paper to selected students | Students receive assignments |
+| Student | Open My Assignments (我的作业), answer and submit | Automatic scoring runs |
+| Teacher | Review subjective answers and finalize grades | Students see final scores and comments |
+| Teacher / student | Review learning reports and incorrect answers | Continue targeted practice |
+
+Screenshots show the current application and a mathematics demo graph, without real student records.

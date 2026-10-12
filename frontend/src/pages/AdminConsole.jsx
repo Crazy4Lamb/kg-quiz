@@ -261,7 +261,7 @@ function Ops() {
         <Col span={8}>
           <Card size="small" title="向量索引状态">
             <Statistic title="语义检索" value={status?.available ? '可用' : '不可用'}
-              valueStyle={{ color: status?.available ? '#52c41a' : '#faad14', fontSize: 22 }} />
+              valueStyle={{ color: status?.available ? 'var(--color-success)' : 'var(--color-warning)', fontSize: 22 }} />
             <Divider style={{ margin: '12px 0' }} />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               向量库不可用时系统自动降级为 SQL LIKE 检索，不影响启动。
@@ -370,11 +370,11 @@ function Teachers() {
     {
       title: '待批改', dataIndex: 'pendingCount', width: 100,
       render: v => v > 0
-        ? <Badge count={v} size="small"><span style={{ color: '#fa8c16' }}>积压</span></Badge>
+        ? <Badge count={v} size="small"><span style={{ color: 'var(--color-warning)' }}>积压</span></Badge>
         : <Typography.Text type="secondary">无</Typography.Text>
     },
     { title: '已批改', dataIndex: 'gradedCount', width: 90,
-      render: v => <span style={{ color: '#52c41a' }}>{v} 人次</span> },
+      render: v => <span style={{ color: 'var(--color-success)' }}>{v} 人次</span> },
     {
       title: '状态', dataIndex: 'enabled', width: 100,
       render: (v, row) => (
@@ -403,7 +403,7 @@ function Teachers() {
         <Col span={6}>
           <Card size="small">
             <Statistic title="待批改积压" value={totals.pending}
-              valueStyle={{ color: totals.pending > 0 ? '#fa8c16' : '#52c41a' }} />
+              valueStyle={{ color: totals.pending > 0 ? 'var(--color-warning)' : 'var(--color-success)' }} />
           </Card>
         </Col>
       </Row>

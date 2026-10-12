@@ -21,7 +21,7 @@ const TASK_META = {
   REVIEW: { label: '复习', color: 'gold', icon: <HistoryOutlined /> }
 };
 
-const masteryColor = (v) => (v >= 0.7 ? '#52c41a' : v >= 0.4 ? '#faad14' : '#ff4d4f');
+const masteryColor = (v) => (v >= 0.7 ? 'var(--color-success)' : v >= 0.4 ? 'var(--color-warning)' : 'var(--color-danger)');
 const pct = (v) => `${Math.round((Number(v) || 0) * 100)}%`;
 
 /**
@@ -287,20 +287,20 @@ export default function LearnHome() {
 
       {/* 学习进度总览 */}
       <Card size="small" loading={loading}>
-        <Row gutter={16} align="middle">
-          <Col span={5}>
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={12} md={5}>
             <Statistic title={isStaff ? '该生知识点' : '我的知识点'} value={progress.total || 0} suffix="个" />
           </Col>
-          <Col span={5}>
-            <Statistic title="已掌握" value={progress.mastered || 0} suffix="个" valueStyle={{ color: '#52c41a' }} />
+          <Col xs={12} md={5}>
+            <Statistic title="已掌握" value={progress.mastered || 0} suffix="个" valueStyle={{ color: 'var(--color-success)' }} />
           </Col>
-          <Col span={5}>
-            <Statistic title="待补强" value={progress.weak || 0} suffix="个" valueStyle={{ color: '#ff4d4f' }} />
+          <Col xs={12} md={5}>
+            <Statistic title="待补强" value={progress.weak || 0} suffix="个" valueStyle={{ color: 'var(--color-danger)' }} />
           </Col>
-          <Col span={5}>
+          <Col xs={12} md={5}>
             <Statistic title="平均掌握度" value={pct(avg)} valueStyle={{ color: masteryColor(avg) }} />
           </Col>
-          <Col span={4} style={{ textAlign: 'right' }}>
+          <Col xs={24} md={4} style={{ textAlign: 'right' }}>
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               <Button size="small" icon={<ReloadOutlined />} loading={busy} onClick={regenerate} block>
                 按最新掌握度重排

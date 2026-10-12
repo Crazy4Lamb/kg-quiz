@@ -72,7 +72,7 @@ export default function StudentList() {
     { title: '姓名', dataIndex: 'name', width: 110 },
     {
       title: '班级', dataIndex: 'clazzName', width: 120,
-      render: (v) => v || <span style={{ color: '#999' }}>未分班</span>
+      render: (v) => v || <span style={{ color: 'var(--color-muted)' }}>未分班</span>
     },
     {
       title: '登录名', dataIndex: 'username', width: 140,
@@ -87,7 +87,7 @@ export default function StudentList() {
     { title: '教材', dataIndex: 'textbook', width: 90 },
     { title: '年级', dataIndex: 'grade', width: 90 },
     { title: '学期', dataIndex: 'term', width: 90 },
-    { title: '图谱', dataIndex: 'graphName', render: v => v || <span style={{ color: '#999' }}>未复制</span> },
+    { title: '图谱', dataIndex: 'graphName', render: v => v || <span style={{ color: 'var(--color-muted)' }}>未复制</span> },
     {
       title: '操作', width: 260, render: (_, row) => (
         <Space size={2}>
@@ -146,7 +146,7 @@ export default function StudentList() {
               </Form.Item>
             </Space>
           </Form.Item>
-          <div style={{ color: '#999', fontSize: 12, marginBottom: 16 }}>
+          <div style={{ color: 'var(--color-muted)', fontSize: 12, marginBottom: 16 }}>
             需先存在对应维度的图谱，新建后将复制一份作为该生的个人图谱（含节点权重，掌握度初始为 0）
           </div>
 
@@ -160,7 +160,7 @@ export default function StudentList() {
           </Form.Item>
 
           <Typography.Text strong style={{ fontSize: 13 }}>登录账号（选填）</Typography.Text>
-          <div style={{ color: '#999', fontSize: 12, margin: '4px 0 12px' }}>
+          <div style={{ color: 'var(--color-muted)', fontSize: 12, margin: '4px 0 12px' }}>
             不填则自动生成 <code>stu{'{学号}'}</code>，初始密码 123456。学生用该账号登录后只能看到自己的图谱、练习与错题本。
           </div>
           <Form.Item name="username" label="登录名"

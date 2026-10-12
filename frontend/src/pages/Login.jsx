@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Form, Input, Button, Typography, Space, Tag, message, Alert, Divider } from 'antd';
-import { UserOutlined, LockOutlined, ApartmentOutlined } from '@ant-design/icons';
+import { UserOutlined, LockOutlined, ApartmentOutlined, ArrowRightOutlined } from '@ant-design/icons';
 import { api, unwrap } from '../api.js';
 import { saveSession, homePathOf, ROLE_LABEL } from '../auth.js';
+import ThemePicker from '../components/ThemePicker.jsx';
 
 /** 演示账号，点一下直接填表，方便快速切换角色看差异 */
 const DEMO_ACCOUNTS = [
@@ -38,42 +39,36 @@ export default function Login() {
   };
 
   return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'linear-gradient(135deg, #e6f4ff 0%, #f7f9fc 45%, #e6fffb 100%)', padding: 24
-    }}>
-      <div style={{
-        width: 900, display: 'flex', background: '#fff', borderRadius: 14, overflow: 'hidden',
-        boxShadow: '0 16px 48px rgba(0, 0, 0, 0.12)'
-      }}>
+    <div className="login-page">
+      <header className="login-topbar"><div className="login-wordmark"><span className="brand-symbol"><ApartmentOutlined /></span><strong>知识图谱 · 题库</strong></div><ThemePicker /></header>
+      <div className="login-card">
         {/* 左：品牌与角色差异说明 */}
-        <div style={{ flex: 1.05, padding: '40px 34px', background: 'linear-gradient(165deg, #1677ff, #0958d9)', color: '#fff' }}>
-          <Space align="center" size={10}>
-            <ApartmentOutlined style={{ fontSize: 26 }} />
-            <Typography.Title level={3} style={{ color: '#fff', margin: 0 }}>知识图谱 · 题库</Typography.Title>
-          </Space>
-          <Typography.Paragraph style={{ color: 'rgba(255,255,255,.88)', marginTop: 16, marginBottom: 20 }}>
-            一套系统三种视角。登录后能看到的菜单、能调用的接口，都由角色决定并由后端强制校验。
-          </Typography.Paragraph>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="login-brand-panel">
+          <span className="login-kicker">让好奇心自由生长 ✦</span>
+          <h1>知识有连接，<br />成长有<span>颜色。</span></h1>
+          <p className="login-intro">探索知识图谱，找到学习的方向。<br />把每一次练习，变成看得见的进步。</p>
+          <div className="knowledge-art" aria-hidden="true">
+            <svg viewBox="0 0 400 190"><path d="M80 60L200 100L330 45M200 100L115 155M200 100L325 155" /></svg>
+            <span className="art-node art-node-one"><ApartmentOutlined />知识</span>
+            <span className="art-node art-node-center">✦ 无限可能</span>
+            <span className="art-node art-node-two">灵感 ↗</span>
+            <span className="art-node art-node-three">练习 ✓</span>
+            <span className="art-node art-node-four">成长 +</span>
+          </div>
+          <div className="login-roles">
             {DEMO_ACCOUNTS.map((acc) => (
-              <div key={acc.role} style={{
-                background: 'rgba(255,255,255,.14)', borderRadius: 8, padding: '10px 14px',
-                border: '1px solid rgba(255,255,255,.22)'
-              }}>
-                <Space>
+              <div key={acc.role} className="login-role">
                   <Tag color={acc.color} style={{ marginRight: 0 }}>{ROLE_LABEL[acc.role]}</Tag>
-                  <span style={{ fontWeight: 600 }}>{acc.username}</span>
-                  <span style={{ color: 'rgba(255,255,255,.7)', fontSize: 12 }}>{acc.desc}</span>
-                </Space>
+                  <span>{acc.desc}</span>
               </div>
             ))}
           </div>
         </div>
 
         {/* 右：登录表单 */}
-        <div style={{ flex: 1, padding: '44px 38px' }}>
-          <Typography.Title level={4} style={{ marginTop: 0 }}>账号登录</Typography.Title>
+        <div className="login-form-panel">
+          <span className="login-form-kicker">准备好新的收获了吗？</span>
+          <Typography.Title level={2} style={{ marginTop: 8 }}>欢迎回来 <span className="login-wave">✦</span></Typography.Title>
           <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
             请输入你的登录账号。学生账号由老师在新建学生时开户。
           </Typography.Paragraph>
@@ -95,11 +90,11 @@ export default function Login() {
             </Form.Item>
             <Button type="primary" size="large" block htmlType="submit" loading={loading}
               style={{ marginTop: 4 }}>
-              登录
+              登录，开启探索 <ArrowRightOutlined />
             </Button>
           </Form>
 
-          <Divider plain style={{ color: '#bfbfbf', fontSize: 12, marginTop: 26 }}>快速体验</Divider>
+          <Divider plain style={{ color: 'var(--color-muted)', fontSize: 12, marginTop: 26 }}>快速体验</Divider>
           <Space wrap>
             {DEMO_ACCOUNTS.map((acc) => (
               <Button key={acc.role} size="small" onClick={() => fill(acc)}>填入{ROLE_LABEL[acc.role]}账号</Button>
@@ -107,6 +102,7 @@ export default function Login() {
           </Space>
         </div>
       </div>
+      <p className="login-footer">连接知识，点亮每一次成长。</p>
     </div>
   );
 }

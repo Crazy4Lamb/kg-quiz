@@ -5,7 +5,7 @@ import {
 import {
   ApartmentOutlined, SearchOutlined, TeamOutlined, FileTextOutlined, RocketOutlined,
   ReadOutlined, SettingOutlined, LogoutOutlined, UserOutlined, KeyOutlined, DownOutlined,
-  BankOutlined, BulbOutlined, SlidersOutlined, AimOutlined
+  BankOutlined, BulbOutlined, SlidersOutlined, AimOutlined, MenuFoldOutlined, MenuUnfoldOutlined
 } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
 import { api, unwrap } from './api.js';
@@ -28,6 +28,7 @@ import DiagnosisReport from './pages/DiagnosisReport.jsx';
 import NodeContent from './pages/NodeContent.jsx';
 import ContentManage from './pages/ContentManage.jsx';
 import RecommendRules from './pages/RecommendRules.jsx';
+import ThemePicker from './components/ThemePicker.jsx';
 
 const { Sider, Header, Content } = Layout;
 
@@ -68,6 +69,20 @@ const TITLES = {
   '/admin': '系统运维'
 };
 
+const DESCRIPTIONS = {
+  '/org': '连接师生，让教学协作更轻松。',
+  '/graphs': '把零散的知识，连成看得见的成长地图。',
+  '/search': '从一个问题出发，发现知识之间的联系。',
+  '/students': '看见每一位学生的进步，找到下一步的方向。',
+  '/questions': '积累好题，让每一次练习都有收获。',
+  '/contents': '让知识更好懂，让学习更有趣。',
+  '/exams': '用恰到好处的练习，巩固每一个知识点。',
+  '/my': '每天前进一点点，今天也有新的收获。',
+  '/my/diagnosis': '了解你的学习起点，找到适合自己的节奏。',
+  '/recommend-rules': '为不同的学习起点，安排合适的下一步。',
+  '/admin': '让每一次教与学，都顺畅发生。'
+};
+
 const sectionOf = (pathname) => {
   if (pathname.startsWith('/my/diagnosis')) return '/my/diagnosis';
   if (pathname.startsWith('/my/learn') || pathname === '/my/graph') return '/my';
@@ -83,6 +98,7 @@ function Shell({ session, onLogout }) {
 
   const [semanticOk, setSemanticOk] = useState(null);
   const [pwdOpen, setPwdOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [pwdForm] = Form.useForm();
 
   useEffect(() => {
@@ -113,19 +129,26 @@ function Shell({ session, onLogout }) {
   };
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Sider theme="dark" width={210}>
-        <div style={{ color: '#fff', padding: '20px 20px 12px', fontSize: 16, fontWeight: 600, lineHeight: 1.35 }}>
-          知识图谱<br />题库管理系统
+    <Layout className="app-shell">
+      <Sider className="app-sidebar" theme="light" width={232} breakpoint="lg" collapsedWidth={0}
+        collapsed={collapsed} trigger={null} onBreakpoint={setCollapsed}>
+        <div className="sidebar-brand">
+          <span className="brand-symbol"><ApartmentOutlined /></span>
+          <div><strong>知识图谱</strong><span>让每一步学习都有方向</span></div>
         </div>
+        <div className="sidebar-section-label">学习工作台</div>
         <Menu
-          theme="dark"
+          theme="light"
           mode="inline"
           selectedKeys={[selected]}
           items={menus}
-          onClick={({ key }) => nav(key)}
+          onClick={({ key }) => {
+            nav(key);
+            if (window.matchMedia('(max-width: 767px)').matches) setCollapsed(true);
+          }}
         />
-        <div style={{ position: 'absolute', bottom: 16, left: 20, right: 16 }}>
+        <div className="sidebar-footer">
+          <div className="sidebar-note"><span>✦</span><strong>把好奇心，变成新收获。</strong><p>知识有连接，成长有颜色。</p></div>
           <Space direction="vertical" size={4}>
             <Tag color={ROLE_COLOR[user.role]} style={{ marginRight: 0 }}>
               {ROLE_LABEL[user.role]} · {user.displayName}
@@ -139,12 +162,17 @@ function Shell({ session, onLogout }) {
         </div>
       </Sider>
 
+      {!collapsed && <button type="button" className="mobile-nav-backdrop" aria-label="关闭导航" onClick={() => setCollapsed(true)} />}
+
       <Layout>
-        <Header style={{
-          background: '#fff', padding: '0 24px', display: 'flex',
-          alignItems: 'center', justifyContent: 'space-between'
-        }}>
-          <Typography.Title level={4} style={{ margin: 0 }}>{title}</Typography.Title>
+        <Header className="app-header">
+          <div className="header-heading">
+            <Button type="text" aria-label={collapsed ? '展开导航' : '收起导航'} aria-expanded={!collapsed}
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} />
+            <span>{title}</span>
+          </div>
+          <div className="header-actions">
+          <ThemePicker />
           <Dropdown
             menu={{
               items: [
@@ -165,16 +193,21 @@ function Shell({ session, onLogout }) {
               }
             }}
           >
-            <Space style={{ cursor: 'pointer' }}>
-              <UserOutlined />
-              <span>{user.displayName}</span>
+            <Button type="text" className="user-menu" aria-label="账户菜单">
+              <span className="user-avatar"><UserOutlined /></span>
+              <span className="user-display-name">{user.displayName}</span>
               <Tag color={ROLE_COLOR[user.role]} style={{ marginRight: 0 }}>{ROLE_LABEL[user.role]}</Tag>
-              <DownOutlined style={{ fontSize: 10, color: '#999' }} />
-            </Space>
+              <DownOutlined style={{ fontSize: 10, color: 'var(--color-muted)' }} />
+            </Button>
           </Dropdown>
+          </div>
         </Header>
 
-        <Content style={{ margin: 16 }}>
+        <Content className="app-content">
+          <section className="page-welcome">
+            <div><span className="page-eyebrow">知识连接 · 每日成长</span><h1>{title}</h1><p>{DESCRIPTIONS[selected] || '探索知识的连接，让每一步都更有收获。'}</p></div>
+            <div className="welcome-art" aria-hidden="true"><i /><i /><i /><span>✦</span></div>
+          </section>
           <Routes>
             <Route path="/" element={<Navigate to={homePathOf(user)} replace />} />
             <Route path="/search" element={<SearchPage />} />

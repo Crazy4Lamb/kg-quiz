@@ -15,9 +15,9 @@ import {
 import { api, unwrap } from '../api.js';
 
 const RELATION_META = {
-  CONTAINS: { label: '包含', color: '#8c8c8c', dashed: false },
-  SIMILAR: { label: '相近', color: '#722ed1', dashed: true },
-  PREREQUISITE: { label: '前置', color: '#389e0d', dashed: false }
+  CONTAINS: { label: '包含', color: 'var(--color-muted)', dashed: false },
+  SIMILAR: { label: '相近', color: 'var(--color-primary)', dashed: true },
+  PREREQUISITE: { label: '前置', color: 'var(--color-success)', dashed: false }
 };
 
 /**
@@ -91,17 +91,17 @@ function KnowledgeNode({ data, selected }) {
   return (
     <div style={{
       padding: '8px 12px', borderRadius: 8, minWidth: 90, textAlign: 'center',
-      background: selected ? '#e6f4ff' : '#fff',
-      border: `2px solid ${selected ? '#1677ff' : '#d9d9d9'}`,
-      boxShadow: selected ? '0 0 0 3px rgba(22,119,255,0.12)' : '0 1px 4px rgba(0,0,0,0.1)',
+      background: selected ? 'var(--color-soft)' : 'var(--color-surface)',
+      border: `2px solid ${selected ? 'var(--color-primary)' : 'var(--color-border)'}`,
+      boxShadow: selected ? '0 0 0 3px var(--color-soft)' : '0 1px 4px rgba(0,0,0,0.1)',
       fontSize: 12
     }}>
-      <Handle type="target" position={Position.Top} style={{ background: '#1677ff' }} />
+      <Handle type="target" position={Position.Top} style={{ background: 'var(--color-primary)' }} />
       <div style={{ fontWeight: 600 }}>{data.label}</div>
       {data.weight != null && (
-        <div style={{ fontSize: 10, color: '#888' }}>权重 {data.weight}</div>
+        <div style={{ fontSize: 10, color: 'var(--color-muted)' }}>权重 {data.weight}</div>
       )}
-      <Handle type="source" position={Position.Bottom} style={{ background: '#52c41a' }} />
+      <Handle type="source" position={Position.Bottom} style={{ background: 'var(--color-success)' }} />
     </div>
   );
 }
@@ -466,8 +466,8 @@ export default function GraphEditor() {
       </Card>
 
       <div style={{
-        height: 'calc(100vh - 220px)', background: '#fff',
-        borderRadius: 8, border: '1px solid #eee'
+        height: 'calc(100vh - 220px)', background: 'var(--color-surface)',
+        borderRadius: 8, border: '1px solid var(--color-border)'
       }}>
         <ReactFlow
           nodes={nodes}
@@ -520,10 +520,10 @@ export default function GraphEditor() {
           />
           <div style={{
             position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 1100,
-            background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0',
+            background: 'var(--color-surface)', borderRadius: 8, border: '1px solid var(--color-border)',
             boxShadow: '0 6px 20px rgba(0,0,0,0.16)', padding: 4, minWidth: 200
           }}>
-            <div style={{ padding: '6px 10px', fontSize: 12, color: '#8c8c8c' }}>{ctxMenu.name}</div>
+            <div style={{ padding: '6px 10px', fontSize: 12, color: 'var(--color-muted)' }}>{ctxMenu.name}</div>
             <Divider style={{ margin: '4px 0' }} />
             <Button type="text" block style={{ justifyContent: 'flex-start' }} icon={<ApartmentOutlined />}
               onClick={() => {
@@ -709,10 +709,10 @@ export default function GraphEditor() {
           <Button key="cancel" onClick={() => setRelEdit(null)}>取消</Button>,
           <Button key="ok" type="primary" onClick={saveRel}>保存</Button>
         ]}>
-        <div style={{ marginBottom: 12, padding: '10px 12px', background: '#fafafa', borderRadius: 6 }}>
+        <div style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--color-background)', borderRadius: 6 }}>
           <Space align="center">
             <Tag color="blue">{nameOf(relEdit?.from)}</Tag>
-            <span style={{ color: '#8c8c8c' }}>→</span>
+            <span style={{ color: 'var(--color-muted)' }}>→</span>
             <Tag color="green">{nameOf(relEdit?.to)}</Tag>
             <Button size="small" onClick={() => setRelEdit(r => ({ ...r, from: r.to, to: r.from }))}>
               交换方向

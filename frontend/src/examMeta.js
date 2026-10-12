@@ -27,7 +27,7 @@ export const ASSIGN_STATUS = {
 };
 
 export const scoreColor = (ratio) => {
-  if (ratio >= 0.85) return '#52c41a';
-  if (ratio >= 0.6) return '#faad14';
-  return '#ff4d4f';
+  if (ratio >= 0.85) return 'var(--color-success)';
+  if (ratio >= 0.6) return 'var(--color-warning)';
+  return 'var(--color-danger)';
 };
