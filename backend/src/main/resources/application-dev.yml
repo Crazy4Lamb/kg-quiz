@@ -1,0 +1,7 @@
+# 内网 dev 环境（192.168.0.69 共享 MySQL / Qdrant）
+# 启用方式：启动加 --spring.profiles.active=dev
+spring:
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:192.168.0.69}:${MYSQL_PORT:23306}/yt_knowledge_demo?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:}

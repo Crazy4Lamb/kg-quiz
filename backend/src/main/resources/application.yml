@@ -1,0 +1,71 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: kg-quiz-backend
+  datasource:
+    # 默认连本机 MySQL；切内网 dev 库用 --spring.profiles.active=dev
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/yt_knowledge_demo?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  sql:
+    init:
+      mode: always
+      # schema.sql 建新表；migration.sql 给已存在的表补列，靠 continue-on-error 容忍重复执行
+      schema-locations: classpath:schema.sql,classpath:migration.sql
+      continue-on-error: true
+  jackson:
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+kg:
+  # 图存储：整个图域（图谱 / 节点 / 关系）都在 Neo4j；MySQL 只存业务域
+  neo4j:
+    enabled: ${NEO4J_ENABLED:true}
+    uri: ${NEO4J_URI:bolt://127.0.0.1:7687}
+    username: ${NEO4J_USER:neo4j}
+    password: ${NEO4J_PASSWORD:kgquiz123}
+    database: ${NEO4J_DATABASE:neo4j}
+  qdrant:
+    enabled: ${QDRANT_ENABLED:true}
+    # 你已有的 Qdrant 实例（192.168.0.69:6333，Qdrant 1.18.1）
+    url: ${QDRANT_URL:http://192.168.0.69:6333}
+    collection: kg_nodes
+  embedding:
+    enabled: ${KG_EMBEDDING_ENABLED:true}
+    # 模型与分词器放在项目 kg-quiz/models/，后端工作目录为 backend/，故用 ../models
+    # 启动脚本会用绝对路径覆盖这两个变量
+    model-path: ${KG_EMBEDDING_MODEL:../models/bge-small-zh-v1.5.onnx}
+    tokenizer-path: ${KG_EMBEDDING_TOKENIZER:../models/tokenizer.json}
+    dim: 512
+  # 大模型：OpenAI 兼容端点。未配置 api-key 时，内容生成 / 题目识别会提示未启用，不影响其余功能
+  llm:
+    enabled: ${LLM_ENABLED:true}
+    base-url: ${LLM_BASE_URL:https://api.deepseek.com}
+    api-key: ${LLM_API_KEY:}
+    model: ${LLM_MODEL:deepseek-chat}
+    timeout-seconds: ${LLM_TIMEOUT_SECONDS:90}
+    max-tokens: ${LLM_MAX_TOKENS:2400}
+    temperature: ${LLM_TEMPERATURE:0.3}
+  exam:
+    # 掌握度 EMA 学习率
+    learning-rate: 0.3
+    # 低于该值视为薄弱知识点
+    weak-threshold: 0.4
+    # 高于该值视为已掌握（进入巩固池）
+    solid-threshold: 0.7
+    # 巩固题占比（防遗忘）
+    consolidate-ratio: 0.2
+
+logging:
+  level:
+    com.kgquiz.quiz: debug
+  charset:
+    console: UTF-8
+    file: UTF-8
