@@ -1,6 +1,6 @@
 # Mathematics Knowledge Graph and Adaptive Practice Platform
 
-[中文](README.md) | [English](README.en.md)
+[项目首页 / Overview](README.md) | [中文说明](README.zh-CN.md) | [English guide](README.en.md)
 
 A teaching demo for administrators, teachers and students. It connects knowledge relationships, questions, assignments and learning feedback to support targeted practice. The sample content covers primary-school mathematics. The application UI is currently Chinese; these repository guides are bilingual.
 
