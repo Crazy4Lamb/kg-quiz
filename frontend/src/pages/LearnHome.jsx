@@ -244,7 +244,7 @@ export default function LearnHome() {
               {row.type === 'LEARN' ? '开始学习' : row.type === 'DIAGNOSIS' ? '去做诊断' : '开始练习'}
             </Button>
             <Tooltip title="不想做时可直接标记完成">
-              <Button size="small" icon={<CheckOutlined />} disabled={busy} onClick={() => finishTask(row)} />
+              <Button size="small" aria-label="标记任务完成" icon={<CheckOutlined />} disabled={busy} onClick={() => finishTask(row)} />
             </Tooltip>
           </Space>
         )

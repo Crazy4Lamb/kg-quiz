@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Input, Select, Button, Table, Tag, Space, Typography, message } from 'antd';
+import { Card, Input, Select, Button, Table, Tag, Space, Typography, message, Empty } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { api, unwrap } from '../api.js';
+import PageToolbar from '../components/PageToolbar.jsx';
 
 const SOURCE_TAG = {
   id: { color: 'blue', text: 'ID 精确' },
@@ -19,26 +20,28 @@ export default function SearchPage() {
   const [graphs, setGraphs] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
   const [semanticAvailable, setSemanticAvailable] = useState(true);
 
-  useState(() => {
+  useEffect(() => {
     api.listGraphs().then(r => setGraphs(unwrap(r) || [])).catch(() => {});
-  });
+  }, []);
 
   const doSearch = async () => {
-    if (!keyword && !nodeId) {
+    if (!keyword.trim() && !nodeId.trim()) {
       message.warning('请输入关键词或节点 ID');
       return;
     }
     setLoading(true);
     try {
       const params = { mode };
-      if (keyword) params.keyword = keyword;
-      if (nodeId) params.nodeId = nodeId;
+      if (keyword.trim()) params.keyword = keyword.trim();
+      if (nodeId.trim()) params.nodeId = nodeId.trim();
       if (graphId) params.graphId = graphId;
       const r = await api.searchNodes(params);
       const d = unwrap(r) || {};
       setRows(d.hits || []);
+      setSearched(true);
       setSemanticAvailable(d.semanticAvailable !== false);
     } catch (e) {
       message.error(e.message);
@@ -50,7 +53,7 @@ export default function SearchPage() {
   const columns = [
     { title: '节点 ID', dataIndex: 'nodeId', width: 90 },
     {
-      title: '知识点', render: (_, r) => (
+      title: '知识点', width: 300, render: (_, r) => (
         <Space direction="vertical" size={2}>
           <Typography.Text strong>{r.name}</Typography.Text>
           {r.description && (
@@ -61,7 +64,7 @@ export default function SearchPage() {
         </Space>
       )
     },
-    { title: '所属图谱', dataIndex: 'graphName', width: 180,
+    { title: '所属图谱', dataIndex: 'graphName', width: 220,
       render: (_, r) => `${r.subject} · ${r.textbook} · ${r.grade}${r.term ? ' · ' + r.term : ''}` },
     { title: '权重', dataIndex: 'weight', width: 70 },
     {
@@ -85,32 +88,34 @@ export default function SearchPage() {
 
   return (
     <Card>
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Input placeholder="关键词（支持字面 + 语义模糊搜索）" style={{ width: 320 }}
+      <PageToolbar filters={
+        <Input placeholder="搜索知识点，例如分数、约分" className="search-keyword" aria-label="搜索知识点"
           value={keyword} onChange={e => setKeyword(e.target.value)}
           onPressEnter={doSearch} prefix={<SearchOutlined />} allowClear />
-        <Input placeholder="节点 ID（精确）" style={{ width: 140 }}
-          value={nodeId} onChange={e => setNodeId(e.target.value)} allowClear />
-        <Select placeholder="限定图谱" allowClear style={{ width: 240 }}
+      } actions={<Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={doSearch}>搜索</Button>} />
+      <div className="search-options">
+        <span className="search-options-label">检索范围</span>
+        <Select aria-label="限定图谱" placeholder="全部图谱" allowClear className="graph-filter"
           value={graphId || undefined}
           onChange={v => setGraphId(v || '')}
           options={graphs.map(g => ({ value: g.id, label: `${g.name}（#${g.id}）` }))} />
-        <Select value={mode} onChange={setMode} style={{ width: 130 }} options={[
+        <Select aria-label="检索方式" value={mode} onChange={setMode} style={{ width: 130 }} options={[
           { value: 'all', label: '全部来源' },
           { value: 'like', label: '仅字面' },
           { value: 'semantic', label: '仅语义' }
         ]} />
-        <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={doSearch}>
-          搜索
-        </Button>
+        <Input aria-label="节点 ID" placeholder="节点 ID（选填）" style={{ width: 140 }}
+          value={nodeId} onChange={e => setNodeId(e.target.value)} onPressEnter={doSearch} allowClear />
+      </div>
+      <div className="list-summary">{searched ? <>找到 <strong>{rows.length}</strong> 个结果</> : '支持关键词、语义与节点 ID 检索'}
         {!semanticAvailable && (
           <Typography.Text type="warning" style={{ fontSize: 12 }}>
-            语义检索不可用（Qdrant 或 embedding 模型未就绪），当前仅字面匹配
+            当前使用关键词匹配
           </Typography.Text>
         )}
-      </Space>
-      <Table rowKey={r => `${r.nodeId}-${r.source}`} dataSource={rows} columns={columns}
-        pagination={{ pageSize: 15 }} locale={{ emptyText: '输入关键词检索知识点，如「分数」「约分」' }} />
+      </div>
+      <Table rowKey={r => `${r.nodeId}-${r.source}`} loading={loading} dataSource={rows} columns={columns} scroll={{ x: 880 }}
+        pagination={{ pageSize: 15, hideOnSinglePage: true }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={searched ? '没有找到相关知识点，试试其他关键词' : '从一个关键词开始探索知识'} /> }} />
     </Card>
   );
 }

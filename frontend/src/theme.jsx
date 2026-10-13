@@ -4,11 +4,11 @@ import zhCN from 'antd/locale/zh_CN';
 
 const STORAGE_KEY = 'kg-quiz-theme';
 export const THEMES = [
-  { id: 'dopamine', name: '活力多巴胺', description: '葡萄紫 × 青柠绿 × 珊瑚粉', primary: '#7040db', accent: '#d5f66b', secondary: '#ff83a7', background: '#f6f3ff', surface: '#ffffff', soft: '#eee6ff', text: '#29213f', muted: '#716780', border: '#e7def3', onAccent: '#344209', dark: false },
-  { id: 'peach', name: '蜜桃派对', description: '蜜桃橙 × 草莓粉 × 奶油黄', primary: '#bd4924', accent: '#ffda70', secondary: '#f5a3c1', background: '#fff6ee', surface: '#ffffff', soft: '#ffeadc', text: '#42281f', muted: '#886d61', border: '#f2dfd1', onAccent: '#573600', dark: false },
-  { id: 'mint', name: '薄荷花园', description: '薄荷绿 × 柠檬黄 × 丁香紫', primary: '#087c68', accent: '#e9f47d', secondary: '#c0a1f3', background: '#eff9f4', surface: '#ffffff', soft: '#dcf4eb', text: '#193e35', muted: '#627e75', border: '#d3e8df', onAccent: '#3c440b', dark: false },
-  { id: 'sky', name: '晴空蓝', description: '晴空蓝 × 杏子橙 × 棉花粉', primary: '#2464c5', accent: '#ffcc87', secondary: '#f9a6c6', background: '#eff6ff', surface: '#ffffff', soft: '#dfedff', text: '#20344f', muted: '#667d99', border: '#d8e5f5', onAccent: '#573707', dark: false },
-  { id: 'midnight', name: '霓虹夜色', description: '电光紫 × 荧光绿 × 热粉红', primary: '#b89aff', accent: '#d2f879', secondary: '#ff8ebd', background: '#181522', surface: '#252032', soft: '#362b4b', text: '#f4efff', muted: '#b6acc9', border: '#443954', onAccent: '#30410a', dark: true }
+  { id: 'dopamine', name: '活力多巴胺', description: '葡萄紫 × 青柠绿 × 珊瑚粉', primary: '#7153cf', accent: '#d7ee91', secondary: '#eda1bb', background: '#f7f7fb', surface: '#ffffff', surfaceAlt: '#f8f7fc', soft: '#f0ecfa', text: '#292536', muted: '#777181', border: '#eae7f0', onAccent: '#344209', dark: false },
+  { id: 'peach', name: '蜜桃派对', description: '蜜桃橙 × 草莓粉 × 奶油黄', primary: '#b95338', accent: '#f7db95', secondary: '#ebb2c8', background: '#faf8f5', surface: '#ffffff', surfaceAlt: '#fcf9f6', soft: '#fbefe8', text: '#3c2c27', muted: '#82726b', border: '#eee6e0', onAccent: '#573600', dark: false },
+  { id: 'mint', name: '薄荷花园', description: '薄荷绿 × 柠檬黄 × 丁香紫', primary: '#217e69', accent: '#e5ecac', secondary: '#bfa9e5', background: '#f5f8f6', surface: '#ffffff', surfaceAlt: '#f6faf8', soft: '#e8f3ee', text: '#273b34', muted: '#6b7c74', border: '#e0eae4', onAccent: '#3c440b', dark: false },
+  { id: 'sky', name: '晴空蓝', description: '晴空蓝 × 杏子橙 × 棉花粉', primary: '#386bbf', accent: '#f5ce9b', secondary: '#eab3cc', background: '#f5f7fa', surface: '#ffffff', surfaceAlt: '#f7f9fc', soft: '#eaf0fb', text: '#29384d', muted: '#6f7d90', border: '#e3e9f1', onAccent: '#573707', dark: false },
+  { id: 'midnight', name: '霓虹夜色', description: '电光紫 × 荧光绿 × 热粉红', primary: '#b59ce9', accent: '#cce696', secondary: '#eaa3c3', background: '#19181f', surface: '#24232d', surfaceAlt: '#2a2935', soft: '#332e43', text: '#ece9f4', muted: '#ada7bc', border: '#3b3748', onAccent: '#30410a', dark: true }
 ];
 
 export function readThemeId() {
@@ -22,7 +22,7 @@ export function applyTheme(id) {
   const palette = THEMES.find((item) => item.id === id) || THEMES[0];
   document.documentElement.dataset.theme = palette.id;
   document.documentElement.style.colorScheme = palette.dark ? 'dark' : 'light';
-  for (const key of ['primary', 'accent', 'secondary', 'background', 'surface', 'soft', 'text', 'muted', 'border', 'onAccent']) {
+  for (const key of ['primary', 'accent', 'secondary', 'background', 'surface', 'surfaceAlt', 'soft', 'text', 'muted', 'border', 'onAccent']) {
     document.documentElement.style.setProperty(`--color-${key}`, palette[key]);
   }
   return palette;
@@ -43,16 +43,16 @@ export function ThemeProvider({ children }) {
       colorBgElevated: palette.surface, colorText: palette.text, colorTextSecondary: palette.muted,
       colorTextPlaceholder: palette.muted, colorTextLightSolid: palette.dark ? palette.background : '#ffffff',
       colorBorder: palette.border, colorBorderSecondary: palette.border,
-      borderRadius: 12, fontFamily: "'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif",
-      controlHeight: 38, controlHeightSM: 28, controlHeightLG: 46
+      borderRadius: 8, fontFamily: "'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif",
+      controlHeight: 36, controlHeightSM: 28, controlHeightLG: 44
     },
     components: {
       Layout: { headerBg: palette.surface, siderBg: palette.surface, bodyBg: palette.background },
-      Menu: { itemBg: 'transparent', itemColor: palette.muted, itemSelectedBg: palette.soft, itemSelectedColor: palette.primary, itemHoverBg: palette.soft, itemBorderRadius: 12, itemHeight: 46 },
-      Table: { headerBg: palette.soft, headerColor: palette.text, rowHoverBg: palette.soft, cellPaddingBlock: 16 },
-      Card: { headerFontSize: 16 },
+      Menu: { itemBg: 'transparent', itemColor: palette.muted, itemSelectedBg: palette.soft, itemSelectedColor: palette.primary, itemHoverBg: palette.surfaceAlt, itemBorderRadius: 9, itemHeight: 42 },
+      Table: { headerBg: palette.surfaceAlt, headerColor: palette.muted, rowHoverBg: palette.surfaceAlt, cellPaddingBlock: 16, cellPaddingInline: 16 },
+      Card: { headerFontSize: 15, paddingLG: 24 },
       Tabs: { titleFontSize: 14 },
-      Button: { primaryShadow: 'none', primaryColor: palette.dark ? palette.background : '#ffffff', fontWeight: 600 }
+      Button: { primaryShadow: 'none', defaultShadow: 'none', dangerShadow: 'none', primaryColor: palette.dark ? palette.background : '#ffffff', fontWeight: 500 }
     }
   }), [palette]);
 

@@ -11,7 +11,7 @@ export default function ThemePicker() {
     <Popover trigger="click" placement="bottomRight" open={open} onOpenChange={setOpen}
       content={
         <div className="theme-panel">
-          <div className="theme-panel-heading">给今天换个心情 <span>5 款主题</span></div>
+          <div className="theme-panel-heading">外观主题 <span>5 款配色</span></div>
           <div className="theme-options">
             {THEMES.map((item) => (
               <button type="button" key={item.id} className="theme-option" aria-pressed={item.id === themeId}
@@ -24,11 +24,12 @@ export default function ThemePicker() {
               </button>
             ))}
           </div>
-          <p className="theme-hint">选择会自动保存，下次打开依然是你喜欢的颜色。</p>
+          <p className="theme-hint">自动保存你的选择</p>
         </div>
       }>
       <Button ref={triggerRef} className="theme-trigger" icon={<BgColorsOutlined />} aria-label={`切换主题，当前：${palette.name}`} aria-expanded={open}>
-        <span className="theme-trigger-label">{palette.name}</span>
+        <span className="theme-trigger-label">主题</span>
+        <span className="theme-trigger-dot" aria-hidden="true" />
       </Button>
     </Popover>
   );

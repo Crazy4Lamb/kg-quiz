@@ -67,10 +67,10 @@ export default function Login() {
 
         {/* 右：登录表单 */}
         <div className="login-form-panel">
-          <span className="login-form-kicker">准备好新的收获了吗？</span>
+          <span className="login-form-kicker">学习与教学，从这里开始</span>
           <Typography.Title level={2} style={{ marginTop: 8 }}>欢迎回来 <span className="login-wave">✦</span></Typography.Title>
           <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
-            请输入你的登录账号。学生账号由老师在新建学生时开户。
+            登录你的账号，继续今天的探索。
           </Typography.Paragraph>
 
           {expired && (
@@ -95,9 +95,9 @@ export default function Login() {
           </Form>
 
           <Divider plain style={{ color: 'var(--color-muted)', fontSize: 12, marginTop: 26 }}>快速体验</Divider>
-          <Space wrap>
+          <Space wrap className="demo-accounts">
             {DEMO_ACCOUNTS.map((acc) => (
-              <Button key={acc.role} size="small" onClick={() => fill(acc)}>填入{ROLE_LABEL[acc.role]}账号</Button>
+              <Button key={acc.role} size="small" aria-label={`填入${ROLE_LABEL[acc.role]}账号`} onClick={() => fill(acc)}>{ROLE_LABEL[acc.role]}</Button>
             ))}
           </Space>
         </div>

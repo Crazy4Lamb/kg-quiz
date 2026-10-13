@@ -1,23 +1,21 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Layout, Menu, Typography, Space, Tag, Dropdown, Modal, Form, Input, message, Button
+  Layout, Menu, Typography, Space, Tag, Dropdown, Modal, Form, Input, message, Button, Card
 } from 'antd';
 import {
   ApartmentOutlined, SearchOutlined, TeamOutlined, FileTextOutlined, RocketOutlined,
   ReadOutlined, SettingOutlined, LogoutOutlined, UserOutlined, KeyOutlined, DownOutlined,
   BankOutlined, BulbOutlined, SlidersOutlined, AimOutlined, MenuFoldOutlined, MenuUnfoldOutlined
 } from '@ant-design/icons';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { api, unwrap } from './api.js';
-import { readSession, clearSession, subscribeSession, ROLE, ROLE_LABEL, ROLE_COLOR, homePathOf } from './auth.js';
+import { readSession, clearSession, subscribeSession, ROLE, ROLE_LABEL, homePathOf } from './auth.js';
 import Login from './pages/Login.jsx';
 import AdminConsole from './pages/AdminConsole.jsx';
 import OrgConsole from './pages/OrgConsole.jsx';
 import GraphList from './pages/GraphList.jsx';
-import GraphEditor from './pages/GraphEditor.jsx';
 import SearchPage from './pages/SearchPage.jsx';
 import StudentList from './pages/StudentList.jsx';
-import StudentGraphView from './pages/StudentGraphView.jsx';
 import QuestionList from './pages/QuestionList.jsx';
 import ExamCenter from './pages/ExamCenter.jsx';
 import PaperTake from './pages/PaperTake.jsx';
@@ -29,6 +27,9 @@ import NodeContent from './pages/NodeContent.jsx';
 import ContentManage from './pages/ContentManage.jsx';
 import RecommendRules from './pages/RecommendRules.jsx';
 import ThemePicker from './components/ThemePicker.jsx';
+
+const GraphEditor = lazy(() => import('./pages/GraphEditor.jsx'));
+const StudentGraphView = lazy(() => import('./pages/StudentGraphView.jsx'));
 
 const { Sider, Header, Content } = Layout;
 
@@ -101,6 +102,8 @@ function Shell({ session, onLogout }) {
   const [collapsed, setCollapsed] = useState(false);
   const [pwdForm] = Form.useForm();
 
+  useEffect(() => { window.scrollTo(0, 0); }, [loc.pathname]);
+
   useEffect(() => {
     // 向量索引状态属管理员接口，其他角色不发请求（否则每次进出都产生一个必然的 403）
     if (user.role !== ROLE.ADMIN) return;
@@ -140,6 +143,7 @@ function Shell({ session, onLogout }) {
         <Menu
           theme="light"
           mode="inline"
+          inlineCollapsed={false}
           selectedKeys={[selected]}
           items={menus}
           onClick={({ key }) => {
@@ -148,9 +152,9 @@ function Shell({ session, onLogout }) {
           }}
         />
         <div className="sidebar-footer">
-          <div className="sidebar-note"><span>✦</span><strong>把好奇心，变成新收获。</strong><p>知识有连接，成长有颜色。</p></div>
+          <div className="sidebar-note"><span>✦</span><div><strong>每天一点新收获</strong><p>连接知识，持续成长</p></div></div>
           <Space direction="vertical" size={4}>
-            <Tag color={ROLE_COLOR[user.role]} style={{ marginRight: 0 }}>
+            <Tag style={{ marginRight: 0 }}>
               {ROLE_LABEL[user.role]} · {user.displayName}
             </Tag>
             {user.role !== ROLE.STUDENT && semanticOk !== null && (
@@ -169,11 +173,12 @@ function Shell({ session, onLogout }) {
           <div className="header-heading">
             <Button type="text" aria-label={collapsed ? '展开导航' : '收起导航'} aria-expanded={!collapsed}
               icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} />
-            <span>{title}</span>
+            <span className="header-product">工作台</span><span className="header-divider">/</span><span>{title}</span>
           </div>
           <div className="header-actions">
           <ThemePicker />
           <Dropdown
+            trigger={['click']}
             menu={{
               items: [
                 { key: 'pwd', icon: <KeyOutlined />, label: '修改密码' },
@@ -196,7 +201,7 @@ function Shell({ session, onLogout }) {
             <Button type="text" className="user-menu" aria-label="账户菜单">
               <span className="user-avatar"><UserOutlined /></span>
               <span className="user-display-name">{user.displayName}</span>
-              <Tag color={ROLE_COLOR[user.role]} style={{ marginRight: 0 }}>{ROLE_LABEL[user.role]}</Tag>
+              <Tag style={{ marginRight: 0 }}>{ROLE_LABEL[user.role]}</Tag>
               <DownOutlined style={{ fontSize: 10, color: 'var(--color-muted)' }} />
             </Button>
           </Dropdown>
@@ -204,10 +209,11 @@ function Shell({ session, onLogout }) {
         </Header>
 
         <Content className="app-content">
-          <section className="page-welcome">
-            <div><span className="page-eyebrow">知识连接 · 每日成长</span><h1>{title}</h1><p>{DESCRIPTIONS[selected] || '探索知识的连接，让每一步都更有收获。'}</p></div>
+          {!/^\/(graphs\/|exams\/(take|grading)\/|my\/learn\/)/.test(loc.pathname) && <section className="page-welcome">
+            <div><h1>{title}</h1><p>{DESCRIPTIONS[selected] || '探索知识的连接，让每一步都更有收获。'}</p></div>
             <div className="welcome-art" aria-hidden="true"><i /><i /><i /><span>✦</span></div>
-          </section>
+          </section>}
+          <Suspense fallback={<Card loading aria-label="正在加载图谱" style={{ minHeight: 320 }} />}>
           <Routes>
             <Route path="/" element={<Navigate to={homePathOf(user)} replace />} />
             <Route path="/search" element={<SearchPage />} />
@@ -246,6 +252,7 @@ function Shell({ session, onLogout }) {
 
             <Route path="*" element={<Navigate to={homePathOf(user)} replace />} />
           </Routes>
+          </Suspense>
         </Content>
       </Layout>
 

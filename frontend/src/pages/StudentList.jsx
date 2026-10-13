@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Card, Table, Button, Modal, Form, Input, Select, Space, Popconfirm, message, Tag, Typography
+  Card, Table, Button, Modal, Form, Input, Select, Space, message, Tag, Typography
 } from 'antd';
-import { PlusOutlined, RadarChartOutlined, KeyOutlined } from '@ant-design/icons';
+import { PlusOutlined, UserOutlined, SearchOutlined, KeyOutlined, DeleteOutlined } from '@ant-design/icons';
 import { api, unwrap } from '../api.js';
+import PageToolbar from '../components/PageToolbar.jsx';
+import RowActions from '../components/RowActions.jsx';
 
 const SUBJECTS = ['数学', '语文', '英语', '物理', '化学', '生物'];
 const TEXTBOOKS = ['人教版', '北师大版', '苏教版', '沪教版'];
@@ -16,6 +18,9 @@ export default function StudentList() {
   const [rows, setRows] = useState([]);
   const [clazzes, setClazzes] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState('');
+  const [classFilter, setClassFilter] = useState();
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
   const [pwdTarget, setPwdTarget] = useState(null);
@@ -40,6 +45,7 @@ export default function StudentList() {
 
   const onCreate = async () => {
     const values = await form.validateFields();
+    setSaving(true);
     try {
       const d = unwrap(await api.createStudent(values));
       message.success(
@@ -51,7 +57,7 @@ export default function StudentList() {
       load();
     } catch (e) {
       message.error(e.message);
-    }
+    } finally { setSaving(false); }
   };
 
   const resetPwd = async () => {
@@ -68,63 +74,54 @@ export default function StudentList() {
   };
 
   const columns = [
-    { title: 'ID', dataIndex: 'id', width: 60 },
-    { title: '姓名', dataIndex: 'name', width: 110 },
+    { title: '学生', dataIndex: 'name', width: 180, render: (name, row) => (
+      <div className="entity-cell"><span className="entity-icon"><UserOutlined /></span><div>
+        <span className="row-title">{name}</span>{row.accountEnabled === 0 && <Tag color="red" style={{ marginLeft: 6 }}>已停用</Tag>}
+        <span className="row-meta">{row.username || '未开户'} · #{row.id}</span>
+      </div></div>
+    ) },
     {
-      title: '班级', dataIndex: 'clazzName', width: 120,
+      title: '班级', dataIndex: 'clazzName', width: 130,
       render: (v) => v || <span style={{ color: 'var(--color-muted)' }}>未分班</span>
     },
+    { title: '学习图谱', dataIndex: 'graphName', width: 320, render: (name, row) => (
+      <div><span>{name || '未复制图谱'}</span><span className="row-meta">{[row.subject, row.textbook, row.grade, row.term].filter(Boolean).join(' · ')}</span></div>
+    ) },
     {
-      title: '登录名', dataIndex: 'username', width: 140,
-      render: (v, row) => v ? (
-        <Space size={6}>
-          <span>{v}</span>
-          {row.accountEnabled === 0 && <Tag color="red">已停用</Tag>}
-        </Space>
-      ) : <Typography.Text type="warning">未开户</Typography.Text>
-    },
-    { title: '学科', dataIndex: 'subject', width: 80 },
-    { title: '教材', dataIndex: 'textbook', width: 90 },
-    { title: '年级', dataIndex: 'grade', width: 90 },
-    { title: '学期', dataIndex: 'term', width: 90 },
-    { title: '图谱', dataIndex: 'graphName', render: v => v || <span style={{ color: 'var(--color-muted)' }}>未复制</span> },
-    {
-      title: '操作', width: 260, render: (_, row) => (
-        <Space size={2}>
-          <Button type="link" size="small" icon={<RadarChartOutlined />}
-            onClick={() => nav(`/students/${row.id}`)} disabled={!row.graphId}>
-            掌握度视图
-          </Button>
-          <Button type="link" size="small" icon={<KeyOutlined />} disabled={!row.username}
-            onClick={() => { pwdForm.resetFields(); setPwdTarget(row); }}>
-            重置密码
-          </Button>
-          <Popconfirm title="删除学生及其图谱副本、掌握度数据与登录账号？" onConfirm={async () => {
-            try {
-              await api.deleteStudent(row.id);
-              message.success('已删除');
-              load();
-            } catch (e) {
-              message.error(e.message);
-            }
-          }}>
-            <Button type="link" size="small" danger>删除</Button>
-          </Popconfirm>
-        </Space>
+      title: '操作', width: 130, render: (_, row) => (
+        <RowActions label={row.name} primary={{ label: '查看学情', disabled: !row.graphId, onClick: () => nav(`/students/${row.id}`) }} items={[
+          { key: 'password', label: '重置密码', icon: <KeyOutlined />, disabled: !row.username,
+            onClick: () => { pwdForm.resetFields(); setPwdTarget(row); } },
+          { key: 'delete', label: '删除学生', icon: <DeleteOutlined />, danger: true,
+            confirm: { title: `删除学生「${row.name}」？`, content: '学生的个人图谱、掌握度数据与登录账号会一并删除。' },
+            onClick: async () => {
+              try { await api.deleteStudent(row.id); message.success('已删除'); load(); }
+              catch (e) { message.error(e.message); throw e; }
+            } }
+        ]} />
       )
     }
   ];
 
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleRows = rows.filter(row => (!classFilter || row.clazzName === classFilter) &&
+    (!normalizedQuery || [row.name, row.username, row.clazzName].some(value => String(value || '').toLowerCase().includes(normalizedQuery))));
+  const classOptions = [...new Set(rows.map(row => row.clazzName).filter(Boolean))].map(value => ({ value, label: value }));
+
   return (
     <Card>
-      <Space style={{ marginBottom: 16 }}>
+      <PageToolbar filters={<>
+        <Input className="toolbar-search" prefix={<SearchOutlined />} placeholder="搜索姓名、账号或班级" aria-label="搜索学生" allowClear value={query} onChange={e => setQuery(e.target.value)} />
+        <Select aria-label="筛选班级" placeholder="全部班级" allowClear options={classOptions} value={classFilter} onChange={setClassFilter} />
+      </>} actions={
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
-          新建学生（复制图谱 + 开户）
+          新建学生
         </Button>
-      </Space>
-      <Table rowKey="id" loading={loading} dataSource={rows} columns={columns} pagination={{ pageSize: 10 }} />
+      } />
+      <div className="list-summary">共 <strong>{visibleRows.length}</strong> 位学生{(normalizedQuery || classFilter) && ' · 已筛选'}</div>
+      <Table rowKey="id" loading={loading} dataSource={visibleRows} columns={columns} scroll={{ x: 760 }} pagination={{ pageSize: 10, hideOnSinglePage: true }} />
 
-      <Modal title="新建学生" open={open} onOk={onCreate} onCancel={() => setOpen(false)} destroyOnClose>
+      <Modal title="新建学生" open={open} onOk={onCreate} confirmLoading={saving} okText="创建学生" onCancel={() => setOpen(false)} destroyOnHidden>
         <Form form={form} layout="vertical"
           initialValues={{ subject: '数学', textbook: '人教版', grade: '五年级', term: '上学期' }}>
           <Form.Item name="name" label="学生姓名" rules={[{ required: true }]}>

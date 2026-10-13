@@ -11,6 +11,8 @@ import {
 import { api, unwrap } from '../api.js';
 import { readSession, ROLE } from '../auth.js';
 import { QTYPE_LABEL, QTYPE_COLOR, ASSIGN_STATUS } from '../examMeta.js';
+import PageToolbar from '../components/PageToolbar.jsx';
+import RowActions from '../components/RowActions.jsx';
 
 const SUBJECTS = ['数学', '语文', '英语', '物理', '化学', '生物'];
 const TEXTBOOKS = ['人教版', '北师大版', '苏教版', '沪教版'];
@@ -153,17 +155,17 @@ export default function PaperPanel() {
       load();
     } catch (e) {
       message.error(e.message);
+      throw e;
     }
   };
 
   const columns = [
-    { title: 'ID', dataIndex: 'examId', width: 60 },
-    { title: '卷子名称', dataIndex: 'name',
+    { title: '试卷名称', dataIndex: 'name', width: 320,
       render: (v, row) => (
         <Space direction="vertical" size={0}>
           <span style={{ fontWeight: 600 }}>{v}</span>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {row.subject || '—'} · {row.textbook || '—'} · {row.questionCount} 题 · {row.totalScore} 分
+            #{row.examId} · {row.subject || '—'} · {row.textbook || '—'} · {row.questionCount} 题 · {row.totalScore} 分
           </Typography.Text>
         </Space>
       ) },
@@ -188,17 +190,12 @@ export default function PaperPanel() {
     { title: '创建时间', dataIndex: 'createdAt', width: 165,
       render: v => (v || '').replace('T', ' ').slice(0, 19) },
     {
-      title: '操作', width: 230, render: (_, row) => (
-        <Space size={2}>
-          <Button type="link" size="small" icon={<SendOutlined />} onClick={() => openAssign(row)}>
-            发送给学生
-          </Button>
-          <Button type="link" size="small" icon={<EditOutlined />}
-            onClick={() => nav(`/exams/grading/${row.examId}`)}>批改</Button>
-          <Popconfirm title={`删除卷子「${row.name}」？`} onConfirm={() => remove(row)}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </Space>
+      title: '操作', width: 110, render: (_, row) => (
+        <RowActions label={row.name} primary={{ label: '批改', onClick: () => nav(`/exams/grading/${row.examId}`) }} items={[
+          { key: 'send', label: '发送给学生', icon: <SendOutlined />, onClick: () => openAssign(row) },
+          { key: 'delete', label: '删除试卷', icon: <DeleteOutlined />, danger: true,
+            confirm: { title: `删除试卷「${row.name}」？` }, onClick: () => remove(row) }
+        ]} />
       )
     }
   ];
@@ -208,33 +205,25 @@ export default function PaperPanel() {
 
   return (
     <div>
-      <Card size="small" style={{ marginBottom: 12 }}>
-        <Space wrap>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>组卷</Button>
-          <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
+      <Card>
+        <PageToolbar filters={<>
+          <span className="list-summary" style={{ marginBottom: 0 }}>共 <strong>{papers.length}</strong> 份试卷</span>
           {isAdmin && (
             <Select allowClear placeholder="按出卷教师筛选" style={{ width: 200 }}
               value={filterTeacher} onChange={setFilterTeacher}
               options={teachers.map(t => ({ value: t.id, label: t.displayName }))} />
           )}
-        </Space>
-        <Alert type="info" showIcon style={{ marginTop: 12 }}
-          message="从题库挑题组成卷子，然后勾选学生定向发送。只有被发送的学生能在「我的作业」里看到这份卷子并作答；其他学生看不到，直接访问接口也会被拒。"
-          description="学生交卷后系统立即自动批改：客观题按答案精确判分，简答题按要点覆盖给参考分并挂起；你再进批改台改分定稿，掌握度会按修正后的得分率更新。" />
-      </Card>
-
-      <Card size="small" title={`我的卷子（${papers.length}）`}>
-        {papers.length === 0 ? <Empty description="还没有卷子，点「组卷」开始" /> : (
-          <Table rowKey="examId" size="small" loading={loading} dataSource={papers}
-            columns={columns} pagination={{ pageSize: 8 }} />
-        )}
+        </>} actions={<><Button icon={<ReloadOutlined />} onClick={load}>刷新</Button><Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>创建试卷</Button></>} />
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 18 }}>从题库选题，发送给指定学生；交卷后可在这里复核评分。</Typography.Paragraph>
+        <Table rowKey="examId" loading={loading} dataSource={papers} scroll={{ x: isAdmin ? 920 : 810 }}
+          columns={columns} pagination={{ pageSize: 8, hideOnSinglePage: true }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有试卷，点击「创建试卷」开始" /> }} />
       </Card>
 
       {/* 组卷弹窗 */}
       <Modal title="组卷" open={createOpen} onOk={submitCreate} width={900}
         onCancel={() => setCreateOpen(false)} okText="创建卷子" destroyOnClose>
         <Form form={createForm} layout="vertical" initialValues={{ subject: '数学', textbook: '人教版' }}>
-          <Space style={{ display: 'flex' }} align="start">
+          <Space style={{ display: 'flex' }} align="start" wrap>
             <Form.Item name="name" label="卷子名称" rules={[{ required: true, message: '请输入卷子名称' }]}
               style={{ width: 300 }}>
               <Input placeholder="如 小数乘法 · 单元测验" />
@@ -260,7 +249,7 @@ export default function PaperPanel() {
           rowKey="id" size="small" loading={poolLoading}
           dataSource={filteredPool}
           pagination={{ pageSize: 6, showSizeChanger: false }}
-          scroll={{ y: 240 }}
+          scroll={{ x: 760, y: 240 }}
           rowSelection={{
             selectedRowKeys: picked,
             onChange: (keys) => setPicked(keys),

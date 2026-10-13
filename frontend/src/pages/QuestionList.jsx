@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
   Card, Table, Button, Modal, Form, Input, InputNumber, Select, Space,
-  Popconfirm, message, Tag, Typography, Alert, Divider, Checkbox, Progress, Tooltip
+  message, Tag, Typography, Alert, Divider, Checkbox, Progress, Tooltip, Dropdown
 } from 'antd';
-import { PlusOutlined, ImportOutlined, BulbOutlined, RobotOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { PlusOutlined, ImportOutlined, BulbOutlined, RobotOutlined, ThunderboltOutlined, DeleteOutlined, DownOutlined } from '@ant-design/icons';
 import { api, unwrap } from '../api.js';
+import PageToolbar from '../components/PageToolbar.jsx';
+import RowActions from '../components/RowActions.jsx';
 
 const SUBJECTS = ['数学', '语文', '英语', '物理', '化学', '生物'];
 const TEXTBOOKS = ['人教版', '北师大版', '苏教版', '沪教版'];
@@ -66,6 +68,7 @@ export default function QuestionList() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form] = Form.useForm();
@@ -146,6 +149,7 @@ export default function QuestionList() {
       score: values.score, difficulty: values.difficulty,
       nodeIds: values.nodeIds
     };
+    setSaving(true);
     try {
       if (editingId) {
         await api.updateQuestion(editingId, payload);
@@ -160,7 +164,7 @@ export default function QuestionList() {
       load();
     } catch (e) {
       message.error(e.message);
-    }
+    } finally { setSaving(false); }
   };
 
   // ---------- 批量导入 ----------
@@ -274,49 +278,48 @@ export default function QuestionList() {
   };
 
   const columns = [
-    { title: 'ID', dataIndex: 'id', width: 60 },
     {
-      title: '题型', dataIndex: 'questionType', width: 90, render: t => {
-        const meta = QUESTION_TYPES.find(x => x.value === t);
-        return <Tag color={TYPE_TAG[t]}>{meta?.label || t}</Tag>;
-      }
-    },
-    { title: '题干', dataIndex: 'stem', ellipsis: true },
-    { title: '科目', dataIndex: 'subject', width: 70 },
-    { title: '教材', dataIndex: 'textbook', width: 85 },
-    { title: '分值', dataIndex: 'score', width: 65 },
-    {
-      title: '难度', dataIndex: 'difficulty', width: 100,
-      render: v => '★'.repeat(v) + '☆'.repeat(5 - v)
+      title: '题目', dataIndex: 'stem', width: 380, render: (stem, row) => (
+        <div>
+          <span className="question-stem" title={stem}>{stem}</span>
+          <span className="row-meta"><Tag color={TYPE_TAG[row.questionType]}>{QUESTION_TYPES.find(x => x.value === row.questionType)?.label || row.questionType}</Tag>
+            #{row.id} · {row.subject} · {row.textbook}
+          </span>
+        </div>
+      )
     },
     {
-      title: '关联知识点', dataIndex: 'nodes', width: 240, render: (nodes, row) => (
+      title: '关联知识点', dataIndex: 'nodes', width: 220, render: (nodes, row) => (
         <Space wrap size={4}>
-          {(nodes || []).map(n => <Tag key={n.id} color="processing">{n.name}</Tag>)}
+          {(nodes || []).map(n => <Tag key={n.id}>{n.name}</Tag>)}
           {(nodes || []).length === 0 && (
             <Tooltip title="还没有映射知识点，用大模型 / 语义识别一下">
-              <Button size="small" type="dashed" icon={<BulbOutlined />}
-                onClick={() => openMapping(row)}>识别</Button>
+              <Button size="small" type="link" icon={<BulbOutlined />}
+                onClick={() => openMapping(row)}>关联知识点</Button>
             </Tooltip>
           )}
         </Space>
       )
     },
     {
-      title: '操作', width: 200, render: (_, row) => (
-        <Space>
-          <Button type="link" size="small" icon={<BulbOutlined />} onClick={() => openMapping(row)}>
-            识别知识点
-          </Button>
-          <Button type="link" size="small" onClick={() => openEdit(row)}>编辑</Button>
-          <Popconfirm title="确认删除该题？" onConfirm={async () => {
-            await api.deleteQuestion(row.id);
-            message.success('已删除');
-            load();
-          }}>
-            <Button type="link" size="small" danger>删除</Button>
-          </Popconfirm>
-        </Space>
+      title: '难度 / 分值', width: 120, render: (_, row) => {
+        const level = Math.max(1, Math.min(5, Number(row.difficulty) || 1));
+        return <div><Tooltip title={`难度 ${level}/5`}><span className="difficulty-dots" role="img" aria-label={`难度 ${level}/5`}>
+          {[1, 2, 3, 4, 5].map(i => <i key={i} className={i <= level ? 'is-filled' : ''} />)}
+        </span></Tooltip><span className="row-meta">{row.score} 分</span></div>;
+      }
+    },
+    {
+      title: '操作', width: 100, render: (_, row) => (
+        <RowActions label={`题目 #${row.id}`} primary={{ label: '编辑', onClick: () => openEdit(row) }} items={[
+          { key: 'mapping', label: '识别知识点', icon: <BulbOutlined />, onClick: () => openMapping(row) },
+          { key: 'delete', label: '删除题目', icon: <DeleteOutlined />, danger: true,
+            confirm: { title: '删除这道题目？', content: '删除后将无法在题库中使用这道题目。' },
+            onClick: async () => {
+              try { await api.deleteQuestion(row.id); message.success('已删除'); load(); }
+              catch (e) { message.error(e.message); throw e; }
+            } }
+        ]} />
       )
     }
   ];
@@ -326,34 +329,36 @@ export default function QuestionList() {
 
   return (
     <Card>
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Select allowClear placeholder="科目" style={{ width: 100 }} options={SUBJECTS.map(v => ({ value: v }))}
+      <PageToolbar filters={<>
+        <Select aria-label="筛选科目" allowClear placeholder="全部科目" value={filters.subject} options={SUBJECTS.map(v => ({ value: v }))}
           onChange={v => { const f = { ...filters, subject: v }; setFilters(f); setPage(1); load(1, f); }} />
-        <Select allowClear placeholder="题型" style={{ width: 110 }} options={QUESTION_TYPES}
+        <Select aria-label="筛选题型" allowClear placeholder="全部题型" value={filters.questionType} options={QUESTION_TYPES}
           onChange={v => { const f = { ...filters, questionType: v }; setFilters(f); setPage(1); load(1, f); }} />
-        <Input.Search placeholder="题干关键词" allowClear style={{ width: 220 }}
+        <Input.Search aria-label="搜索题目" placeholder="搜索题干关键词" allowClear className="toolbar-search"
           onSearch={v => { const f = { ...filters, keyword: v }; setFilters(f); setPage(1); load(1, f); }} />
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingId(null); setOpen(true); }}>
-          录入题目
-        </Button>
-        <Button icon={<ImportOutlined />} onClick={openImport}>批量导入</Button>
-        <Tooltip title="对还没有映射知识点的题目批量识别并写入">
-          <Button icon={<RobotOutlined />} onClick={() => {
+      </>} actions={<>
+        <Dropdown trigger={['click']} menu={{ items: [
+          { key: 'import', label: '批量导入题目', icon: <ImportOutlined /> },
+          { key: 'mapping', label: '批量关联知识点', icon: <RobotOutlined /> }
+        ], onClick: ({ key }) => {
+          if (key === 'import') { openImport(); return; }
             setAutoResult(null);
             autoForm.setFieldsValue({
               graphId: graphs[0]?.id, maxQuestions: 50
             });
             setAutoOpen(true);
-          }}>一键映射知识点</Button>
-        </Tooltip>
-      </Space>
+        } }}><Button>批量操作 <DownOutlined style={{ fontSize: 10 }} /></Button></Dropdown>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setGraphNodes([]); setEditingId(null); setOpen(true); }}>录入题目</Button>
+      </>} />
 
-      <Table rowKey="id" loading={loading} dataSource={rows} columns={columns}
-        pagination={{ current: page, pageSize: 10, total, onChange: p => { setPage(p); load(p); } }} />
+      <div className="list-summary">共 <strong>{total}</strong> 道题目</div>
 
-      <Modal title={editingId ? '编辑题目' : '录入题目'} open={open} onOk={submit}
+      <Table rowKey="id" loading={loading} dataSource={rows} columns={columns} scroll={{ x: 820 }}
+        pagination={{ current: page, pageSize: 10, total, hideOnSinglePage: true, showSizeChanger: false, onChange: p => { setPage(p); load(p); } }} />
+
+      <Modal title={editingId ? '编辑题目' : '录入题目'} open={open} onOk={submit} confirmLoading={saving} okText={editingId ? '保存修改' : '录入题目'}
         onCancel={() => { setOpen(false); setEditingId(null); form.resetFields(); }}
-        width={720} destroyOnClose>
+        width={720} destroyOnHidden>
         <Form form={form} layout="vertical"
           initialValues={{ subject: '数学', textbook: '人教版', questionType: 'SINGLE_CHOICE', score: 5, difficulty: 3, options: ['', '', '', ''] }}>
           <Space wrap>
@@ -384,9 +389,9 @@ export default function QuestionList() {
                 {(fields, { add, remove }) => (
                   <>
                     {fields.map(field => (
-                      <Space key={field.key} style={{ display: 'flex', marginBottom: 4 }}>
+                      <Space key={field.key} className="question-option-row" style={{ display: 'flex', marginBottom: 8 }}>
                         <Form.Item name={field.name} noStyle>
-                          <Input placeholder={`选项 ${field.name + 1}`} style={{ width: 400 }} />
+                          <Input placeholder={`选项 ${field.name + 1}`} />
                         </Form.Item>
                         {fields.length > 2 && (
                           <Button type="link" danger size="small" onClick={() => remove(field.name)}>删除</Button>

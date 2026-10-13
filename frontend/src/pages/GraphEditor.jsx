@@ -6,11 +6,11 @@ import {
 } from '@xyflow/react';
 import {
   Card, Button, Space, Modal, Form, Input, InputNumber, Select, Drawer,
-  Popconfirm, message, Typography, Tag, Tooltip, Flex, Table, Switch, Progress, Divider, Alert, Radio
+  Popconfirm, message, Typography, Tag, Tooltip, Table, Switch, Progress, Divider, Alert, Radio, Dropdown, Collapse
 } from 'antd';
 import {
   PlusOutlined, SaveOutlined, ArrowLeftOutlined, DeleteOutlined, TrophyOutlined,
-  NodeIndexOutlined, EditOutlined, ApartmentOutlined, ImportOutlined, InfoCircleOutlined
+  NodeIndexOutlined, EditOutlined, ApartmentOutlined, ImportOutlined, InfoCircleOutlined, MoreOutlined
 } from '@ant-design/icons';
 import { api, unwrap } from '../api.js';
 
@@ -430,45 +430,35 @@ export default function GraphEditor() {
   return (
     <div>
       <Card size="small" style={{ marginBottom: 12 }}>
-        <Flex justify="space-between" align="center" wrap="wrap" gap={8}>
-          <Space>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => nav('/graphs')}>返回</Button>
-            <Typography.Title level={5} style={{ margin: 0 }}>
-              {graph?.name}
-            </Typography.Title>
-            <Tooltip title="修改图谱名称与描述">
-              <Button size="small" icon={<EditOutlined />} onClick={openInfo}>编辑信息</Button>
-            </Tooltip>
-            <Tag>{graph?.subject} · {graph?.textbook} · {graph?.grade} · {graph?.term}</Tag>
-          </Space>
-          <Space wrap>
-            {Object.entries(RELATION_META).map(([k, v]) => (
-              <Tag key={k} style={{ fontSize: 12 }}>
-                <span style={{
-                  display: 'inline-block', width: 20, height: 0,
-                  borderTop: `2px ${v.dashed ? 'dashed' : 'solid'} ${v.color}`, marginRight: 4
-                }} />{v.label}
-              </Tag>
-            ))}
-            <Tooltip title="先单击选中一个知识点，再点此新增并与它建立关系">
-              <Button icon={<NodeIndexOutlined />} disabled={!selectedNodeId} onClick={openAddFromSelection}>
-                关联新增{selectedName ? `：${selectedName}` : ''}
-              </Button>
-            </Tooltip>
-            <Button icon={<TrophyOutlined />} onClick={() => openRank()}>核心知识点排序</Button>
-            <Tooltip title="从 Excel 里复制大纲直接粘贴，按缩进自动建层级">
-              <Button icon={<ImportOutlined />} onClick={openImport}>批量导入</Button>
-            </Tooltip>
-            <Button icon={<PlusOutlined />} onClick={() => openAdd(null)}>自由新增</Button>
+        <div className="graph-topbar">
+          <div className="graph-heading">
+            <Button type="text" aria-label="返回图谱列表" icon={<ArrowLeftOutlined />} onClick={() => nav('/graphs')} />
+            <div className="graph-title"><h2>{graph?.name}</h2><span className="row-meta">{graph?.subject} · {graph?.textbook} · {graph?.grade} · {graph?.term}</span></div>
+          </div>
+          <div className="toolbar-actions">
+            <Dropdown trigger={['click']} menu={{ items: [
+              { key: 'info', icon: <EditOutlined />, label: '编辑图谱信息' },
+              { key: 'import', icon: <ImportOutlined />, label: '批量导入知识点' },
+              { key: 'rank', icon: <TrophyOutlined />, label: '核心知识点排序' }
+            ], onClick: ({ key }) => {
+              if (key === 'info') openInfo();
+              else if (key === 'import') openImport();
+              else openRank();
+            } }}><Button icon={<MoreOutlined />}>更多</Button></Dropdown>
+            <Button icon={<PlusOutlined />} onClick={() => openAdd(null)}>添加知识点</Button>
             <Button type="primary" icon={<SaveOutlined />} onClick={saveLayout}>保存布局</Button>
-          </Space>
-        </Flex>
+          </div>
+        </div>
+        <div className="graph-legend">
+          <div className="graph-legend-items">{Object.entries(RELATION_META).map(([key, relation]) => (
+            <span key={key}><i style={{ display: 'inline-block', width: 16, borderTop: `2px ${relation.dashed ? 'dashed' : 'solid'} ${relation.color}`, marginRight: 5, verticalAlign: 'middle' }} />{relation.label}</span>
+          ))}</div>
+          {selectedNodeId ? <Button type="link" size="small" icon={<NodeIndexOutlined />} onClick={openAddFromSelection}>关联新增：{selectedName}</Button>
+            : <span>单击选择知识点 · 双击编辑</span>}
+        </div>
       </Card>
 
-      <div style={{
-        height: 'calc(100vh - 220px)', background: 'var(--color-surface)',
-        borderRadius: 8, border: '1px solid var(--color-border)'
-      }}>
+      <div className="graph-canvas">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -504,11 +494,11 @@ export default function GraphEditor() {
         </ReactFlow>
       </div>
 
-      <Typography.Paragraph type="secondary" style={{ marginTop: 8, fontSize: 12 }}>
+      <Collapse ghost size="small" className="graph-guide" items={[{ key: 'guide', label: '操作指南', children: <Typography.Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
         操作说明：拖拽节点调整布局（点"保存布局"持久化）；单击选中节点后点"关联新增"，或直接在节点上点右键，可新增知识点并同时指定与它的关系（前置/后置/包含/被包含/相近）；
         双击节点编辑属性；<b>点击连线可修改关系类型、交换方向或删除</b>；从一个节点底部圆点拖到另一节点顶部圆点创建关系；
         "批量导入"支持把 Excel 里的大纲按缩进直接粘贴成知识点树。
-      </Typography.Paragraph>
+      </Typography.Paragraph> }]} />
 
       {/* 节点右键菜单 */}
       {ctxMenu && (

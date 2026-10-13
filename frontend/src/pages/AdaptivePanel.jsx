@@ -5,6 +5,7 @@ import {
 } from 'antd';
 import { ThunderboltOutlined, CheckOutlined } from '@ant-design/icons';
 import { api, unwrap } from '../api.js';
+import PageToolbar from '../components/PageToolbar.jsx';
 
 const STATUS_TAG = { PENDING: 'gold', CONFIRMED: 'blue' };
 
@@ -69,7 +70,7 @@ export default function AdaptivePanel() {
   return (
     <div>
       <Card size="small" title="生成出题方案" style={{ marginBottom: 12 }}>
-        <Space wrap>
+        <PageToolbar filters={<>
           <Select placeholder="选择学生" style={{ width: 200 }} showSearch optionFilterProp="label"
             value={studentId} onChange={setStudentId}
             options={students.map(s => ({ value: s.id, label: `${s.name}（${s.subject || '未复制'}/${s.grade || '-'}）` }))} />
@@ -77,13 +78,11 @@ export default function AdaptivePanel() {
             addonBefore="题数" style={{ width: 140 }} />
           <InputNumber min={1} max={10} value={perNode} onChange={setPerNode}
             addonBefore="每知识点上限" style={{ width: 170 }} />
-          <Button type="primary" icon={<ThunderboltOutlined />} loading={loading} onClick={generate}>
+        </>} actions={<Button type="primary" icon={<ThunderboltOutlined />} loading={loading} onClick={generate}>
             生成方案
-          </Button>
-        </Space>
+          </Button>} />
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 8, fontSize: 12 }}>
-          策略：薄弱知识点优先补强（结合权重与前置关系），并保留约 20% 巩固题防遗忘；难度随掌握度自适应（薄弱出易题、巩固出难题）。
-          确认后会同时把这份练习指派给该学生，他在「我的作业」里直接作答，系统自动批改。
+          根据学生的掌握情况安排补强与巩固练习，确认方案后发送给所选学生。
         </Typography.Paragraph>
       </Card>
 
@@ -130,7 +129,7 @@ export default function AdaptivePanel() {
 
       <Card size="small" title="历史方案 / 练习">
         {exams.length === 0 ? <Empty description="暂无记录" /> : (
-          <Table rowKey="examId" dataSource={exams} pagination={{ pageSize: 8 }} size="small"
+          <Table rowKey="examId" dataSource={exams} scroll={{ x: 720 }} pagination={{ pageSize: 8, hideOnSinglePage: true }} size="small"
             columns={[
               { title: '练习 ID', dataIndex: 'examId', width: 90 },
               {

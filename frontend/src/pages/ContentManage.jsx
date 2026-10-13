@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import { api, unwrap } from '../api.js';
 import Markdown from '../components/Markdown.jsx';
+import RowActions from '../components/RowActions.jsx';
 
 const BY_LABEL = {
   LLM: { text: '大模型生成', color: 'blue' },
@@ -201,13 +202,10 @@ export default function ContentManage() {
     {
       title: '操作', width: 130,
       render: (_, row) => (
-        <Space size={4}>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openNode(row)}>内容</Button>
-          <Tooltip title="快速生成一篇讲义">
-            <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />}
-              onClick={() => { setNode(row); genForm.resetFields(); genForm.setFieldsValue({ type: 'LECTURE' }); setGenOpen(true); }} />
-          </Tooltip>
-        </Space>
+        <RowActions label={row.nodeName} primary={{ label: '编辑内容', onClick: () => openNode(row) }} items={[
+          { key: 'generate', label: '生成讲义', icon: <ThunderboltOutlined />,
+            onClick: () => { setNode(row); genForm.resetFields(); genForm.setFieldsValue({ type: 'LECTURE' }); setGenOpen(true); } }
+        ]} />
       )
     }
   ];
@@ -218,22 +216,16 @@ export default function ContentManage() {
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
 
       {status && (
-        <Alert type={status.available ? 'success' : 'warning'} showIcon
-          icon={status.available ? <RobotOutlined /> : undefined}
-          message={status.available
-            ? `大模型已就绪（${status.model}），生成的内容由模型撰写`
-            : status.reason}
-          description={status.available
-            ? '生成的内容会直接调用大模型，请教师审核后再发布给学生。'
-            : '当前会降级为规则模板生成（用知识点说明 + 前置关系 + 已有题目自动拼装），链路仍可完整演示。配置 LLM_API_KEY 后重启即可切换到模型生成。'} />
+        <Alert type="info" showIcon icon={<RobotOutlined />}
+          message={status.available ? 'AI 辅助生成已就绪，生成后请审核再发布。' : '当前使用基础模板生成，生成后请审核再发布。'} />
       )}
 
       <Card size="small" title={<Space><FileTextOutlined />教学内容生成</Space>}
         extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => { loadOverview(graphId); loadStatus(); }}>刷新</Button>}>
-        <Space wrap size={12} align="end">
-          <div>
+        <div className="content-graph-picker">
+          <div style={{ width: 320, maxWidth: '100%' }}>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>选择图谱</Typography.Text>
-            <Select style={{ width: 320 }} value={graphId} placeholder="选择一张图谱"
+            <Select style={{ width: '100%' }} value={graphId} placeholder="选择一张图谱"
               onChange={setGraphId}
               options={graphs.map((g) => ({
                 value: g.id,
@@ -246,18 +238,18 @@ export default function ContentManage() {
               <b style={{ color: 'var(--color-warning)' }}> {overview.total - overview.withContent}</b> 个还没有
             </Typography.Text>
           )}
-        </Space>
+        </div>
 
         <Divider style={{ margin: '14px 0 12px' }} />
 
-        <Form form={batchForm} layout="inline" initialValues={{ types: ['LECTURE'], onlyMissing: true }}>
+        <Form form={batchForm} layout="vertical" className="content-batch-form" initialValues={{ types: ['LECTURE'], onlyMissing: true }}>
           <Form.Item name="types" label="生成类型" rules={[{ required: true, message: '至少选一种' }]}>
             <Checkbox.Group options={(status?.types || []).map((t) => ({ label: t.label, value: t.value }))} />
           </Form.Item>
           <Form.Item name="onlyMissing" label="只补缺失" valuePropName="checked">
             <Switch size="small" />
           </Form.Item>
-          <Form.Item name="extraInstruction" label="补充要求" style={{ minWidth: 280 }}>
+          <Form.Item name="extraInstruction" label="补充要求" style={{ flex: '1 1 280px', minWidth: 0 }}>
             <Input placeholder="如：面向基础薄弱学生，多用生活例子" allowClear />
           </Form.Item>
           <Form.Item>
@@ -268,13 +260,13 @@ export default function ContentManage() {
           </Form.Item>
         </Form>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          说明：整张图谱逐个知识点调用大模型，节点多时会比较慢，请耐心等待；「只补缺失」会跳过已有该类内容的知识点。
+          内容较多时生成需要一些时间；开启「只补缺失」可跳过已有内容。
         </Typography.Text>
       </Card>
 
       <Card size="small" title="图谱内容覆盖情况">
         <Table rowKey="nodeId" size="small" loading={loading} dataSource={overview?.nodes || []}
-          columns={columns} pagination={{ pageSize: 12, hideOnSinglePage: true }} />
+          columns={columns} scroll={{ x: 820 }} pagination={{ pageSize: 12, hideOnSinglePage: true }} />
       </Card>
 
       {/* 单知识点内容管理 */}
