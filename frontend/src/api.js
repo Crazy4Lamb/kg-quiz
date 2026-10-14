@@ -182,7 +182,22 @@ export const api = {
   batchSuggestMapping: (data) => http.post('/questions/mapping/batch', data),
   autoMapping: (data) => http.post('/questions/mapping/auto', data),
   applyMapping: (data) => http.post('/questions/mapping/apply', data),
-  removeMapping: (questionId, nodeId) => http.delete(`/questions/mapping/${questionId}/${nodeId}`)
+  removeMapping: (questionId, nodeId) => http.delete(`/questions/mapping/${questionId}/${nodeId}`),
+
+  // Agent 配置域：工具注册表（只读）+ 编排配置 + 上下文预演
+  agentTools: () => http.get('/agents/tools'),
+  listAgents: (params) => http.get('/agents', { params }),
+  myAgents: () => http.get('/agents/mine'),
+  saveAgent: (data) => http.post('/agents', data),
+  setAgentEnabled: (id, enabled) => http.put(`/agents/${id}/enabled`, null, { params: { enabled } }),
+  bindAgentTools: (id, toolKeys) => http.post(`/agents/${id}/tools`, { agentId: id, toolKeys }),
+  deleteAgent: (id) => http.delete(`/agents/${id}`),
+  dryRunAgent: (code, studentId) => http.post(`/agents/${code}/dry-run`, null, { params: { studentId } }),
+
+  // 讲解 IR：分镜是讲解的唯一真源，Markdown / 教案都从它渲染
+  studentStoryboard: (nodeId) => http.get(`/contents/node/${nodeId}/storyboard`),
+  rerenderContent: (id, data) => http.post(`/contents/${id}/rerender`, data),
+  recheckContent: (id) => http.post(`/contents/${id}/recheck`)
 };
 
 export const unwrap = (r) => r?.data ?? r;

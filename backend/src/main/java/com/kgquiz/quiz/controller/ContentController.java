@@ -81,12 +81,34 @@ public class ContentController {
         return R.ok(contentService.update(id, req.title(), req.summary(), req.body()));
     }
 
-    /** 发布 / 撤回（body: {"status":"PUBLISHED"} 或 {"status":"DRAFT"}） */
+    /** 发布 / 撤回（body: {"status":"PUBLISHED"} 或 {"status":"DRAFT"}）。自检未通过会被拒绝 */
     @PutMapping("/{id}/status")
     @RequireRole({UserRole.TEACHER, UserRole.ADMIN})
     public R<Map<String, Object>> setStatus(@PathVariable Long id,
                                             @RequestBody Map<String, String> body) {
         return R.ok(contentService.setStatus(id, body.get("status")));
+    }
+
+    /**
+     * 用讲解 IR 重新渲染正文（可选连带重渲染教案）。
+     *
+     * <p>IR 是真源、正文是投影，所以改完 IR 后靠这个端点把投影刷新一遍。</p>
+     */
+    @PostMapping("/{id}/rerender")
+    @RequireRole({UserRole.TEACHER, UserRole.ADMIN})
+    public R<Map<String, Object>> rerender(@PathVariable Long id,
+                                           @RequestBody(required = false) Map<String, Object> body) {
+        Long explainId = body == null || body.get("explainContentId") == null
+                ? null : Long.valueOf(String.valueOf(body.get("explainContentId")));
+        boolean withPlan = body != null && Boolean.TRUE.equals(body.get("rerenderLessonPlans"));
+        return R.ok(contentService.rerender(id, explainId, withPlan));
+    }
+
+    /** 重新自检：对已落库内容重跑一遍门禁（教师改完讲解后自用） */
+    @PostMapping("/{id}/recheck")
+    @RequireRole({UserRole.TEACHER, UserRole.ADMIN})
+    public R<Map<String, Object>> recheck(@PathVariable Long id) {
+        return R.ok(contentService.recheck(id));
     }
 
     @DeleteMapping("/{id}")
@@ -98,9 +120,21 @@ public class ContentController {
 
     // ==================== 学生学习 ====================
 
-    /** 学生视角：只返回已发布内容 */
+    /** 学生视角：只返回已发布内容（教案对教师可见，对学生隐藏） */
     @GetMapping("/node/{nodeId}/published")
     public R<List<Map<String, Object>>> published(@PathVariable Long nodeId) {
         return R.ok(contentService.studentContents(nodeId));
+    }
+
+    /**
+     * 学生端逐段讲解：返回已发布讲解的分镜 IR（分段 / 旁白 / 画面 / 视觉锚点）。
+     *
+     * <p>与 {@link #published} 的分工：那个给整篇 Markdown 便于一次性渲染，
+     * 这个给结构化分段，让前端能做「逐步呈现 / 跳读」——
+     * 正是把视觉绑在段落而非秒数带来的好处。</p>
+     */
+    @GetMapping("/node/{nodeId}/storyboard")
+    public R<Map<String, Object>> storyboard(@PathVariable Long nodeId) {
+        return R.ok(contentService.studentStoryboard(nodeId));
     }
 }

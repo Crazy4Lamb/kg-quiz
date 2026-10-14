@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  Card, Space, Tag, Typography, message, Empty, Button, Tabs, Descriptions, Alert, Divider
+  Card, Space, Tag, Typography, message, Empty, Button, Tabs, Descriptions, Alert, Divider, Spin
 } from 'antd';
 import {
-  ArrowLeftOutlined, ExperimentOutlined, ReadOutlined, BulbOutlined, FileTextOutlined
+  ArrowLeftOutlined, ExperimentOutlined, ReadOutlined, BulbOutlined, FileTextOutlined,
+  VideoCameraOutlined
 } from '@ant-design/icons';
 import { api, unwrap } from '../api.js';
 import Markdown from '../components/Markdown.jsx';
+import StoryboardReader from '../components/StoryboardReader.jsx';
 
 const TYPE_ICON = {
+  EXPLAIN: <VideoCameraOutlined />,
   LECTURE: <ReadOutlined />,
   EXAMPLE: <BulbOutlined />,
   MICRO_LESSON: <FileTextOutlined />,
@@ -25,11 +28,15 @@ const BY_LABEL = {
  * 知识点学习内容页（学生视角，只展示已发布内容）。
  *
  * <p>支持从学习任务直接进入（/my/learn/:nodeId），也可以带 examId 返回答题页。</p>
+ *
+ * <p>讲解（EXPLAIN）走分镜阅读器而非整篇 Markdown：分镜 IR 带旁白与画面锚点，
+ * 逐段呈现体验明显好于一次性甩一整篇，也顺手支持了跳读。</p>
  */
 export default function NodeContent() {
   const nav = useNavigate();
   const { nodeId } = useParams();
   const [items, setItems] = useState([]);
+  const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -37,9 +44,16 @@ export default function NodeContent() {
   const load = async () => {
     setLoading(true);
     try {
-      const list = unwrap(await api.publishedContents(Number(nodeId))) || [];
-      setItems(list);
-      setActive(list[0]?.id ?? null);
+      const [list, sb] = await Promise.all([
+        api.publishedContents(Number(nodeId)),
+        api.studentStoryboard(Number(nodeId)).catch(() => null)
+      ]);
+      const arr = unwrap(list) || [];
+      setItems(arr);
+      setBoard(unwrap(sb));
+      // 默认落在讲解上（若已发布）——它是这个页面最该先看的东西
+      const explain = arr.find((i) => i.type === 'EXPLAIN');
+      setActive(explain?.id ?? arr[0]?.id ?? null);
     } catch (e) {
       message.error(e.message);
     } finally {
@@ -89,6 +103,13 @@ export default function NodeContent() {
 
   const current = items.find((i) => i.id === active) || items[0];
   const by = BY_LABEL[current.generatedBy] || { text: current.generatedBy, color: 'default' };
+  const showBoard = current.type === 'EXPLAIN' && board?.available;
+
+  const renderBody = (item) => (
+    item.type === 'EXPLAIN' && board?.available
+      ? <StoryboardReader data={board} practiceOnNode={practice} />
+      : <div style={{ maxWidth: 900 }}><Markdown text={item.body} /></div>
+  );
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -99,6 +120,11 @@ export default function NodeContent() {
             <span>{current.title || '学习内容'}</span>
             <Tag color={by.color}>{by.text}</Tag>
             {current.version > 1 && <Tag>v{current.version}</Tag>}
+            {showBoard && board.storyboardSummary?.segmentCount > 0 && (
+              <Tag color="geekblue">
+                {board.storyboardSummary.segmentCount} 段讲解 · 约 {board.storyboardSummary.totalSeconds} 秒
+              </Tag>
+            )}
           </Space>
         }
         extra={
@@ -125,19 +151,11 @@ export default function NodeContent() {
             items={items.map((i) => ({
               key: String(i.id),
               label: <Space size={4}>{TYPE_ICON[i.type]}{i.typeLabel || i.type}</Space>,
-              children: (
-                <div style={{ maxWidth: 900 }}>
-                  <Markdown text={i.body} />
-                </div>
-              )
+              children: renderBody(i)
             }))} />
         </Card>
       ) : (
-        <Card size="small">
-          <div style={{ maxWidth: 900 }}>
-            <Markdown text={current.body} />
-          </div>
-        </Card>
+        <Card size="small">{renderBody(current)}</Card>
       )}
 
       <Divider style={{ margin: 0 }} />

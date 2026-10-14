@@ -5,7 +5,8 @@ import {
 import {
   ApartmentOutlined, SearchOutlined, TeamOutlined, FileTextOutlined, RocketOutlined,
   ReadOutlined, SettingOutlined, LogoutOutlined, UserOutlined, KeyOutlined, DownOutlined,
-  BankOutlined, BulbOutlined, SlidersOutlined, AimOutlined, MenuFoldOutlined, MenuUnfoldOutlined
+  BankOutlined, BulbOutlined, SlidersOutlined, AimOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
+  RobotOutlined
 } from '@ant-design/icons';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { api, unwrap } from './api.js';
@@ -26,6 +27,7 @@ import DiagnosisReport from './pages/DiagnosisReport.jsx';
 import NodeContent from './pages/NodeContent.jsx';
 import ContentManage from './pages/ContentManage.jsx';
 import RecommendRules from './pages/RecommendRules.jsx';
+import Agents from './pages/Agents.jsx';
 import ThemePicker from './components/ThemePicker.jsx';
 
 const GraphEditor = lazy(() => import('./pages/GraphEditor.jsx'));
@@ -52,6 +54,7 @@ const MENUS = [
   { key: '/my', icon: <ReadOutlined />, label: '我的学习', roles: [ROLE.STUDENT] },
   { key: '/my/diagnosis', icon: <AimOutlined />, label: '学习诊断', roles: [ROLE.STUDENT] },
   { key: '/recommend-rules', icon: <SlidersOutlined />, label: '推荐规则', roles: [ROLE.ORG_ADMIN, ROLE.ADMIN] },
+  { key: '/agents', icon: <RobotOutlined />, label: 'Agent 管理', roles: [ROLE.ORG_ADMIN, ROLE.ADMIN] },
   { key: '/admin', icon: <SettingOutlined />, label: '系统运维', roles: [ROLE.ADMIN] }
 ];
 
@@ -67,6 +70,7 @@ const TITLES = {
   '/my': '我的学习',
   '/my/diagnosis': '我的诊断报告',
   '/recommend-rules': '学习优先级推荐规则',
+  '/agents': 'Agent 管理台',
   '/admin': '系统运维'
 };
 
@@ -81,6 +85,7 @@ const DESCRIPTIONS = {
   '/my': '每天前进一点点，今天也有新的收获。',
   '/my/diagnosis': '了解你的学习起点，找到适合自己的节奏。',
   '/recommend-rules': '为不同的学习起点，安排合适的下一步。',
+  '/agents': '把工具、编排与权限分开管，让 Agent 行为可控可查。',
   '/admin': '让每一次教与学，都顺畅发生。'
 };
 
@@ -239,6 +244,7 @@ function Shell({ session, onLogout }) {
                 <Route path="/questions" element={<QuestionList />} />
                 <Route path="/contents" element={<ContentManage />} />
                 <Route path="/recommend-rules" element={<RecommendRules />} />
+                <Route path="/agents" element={<Agents />} />
               </>
             )}
 

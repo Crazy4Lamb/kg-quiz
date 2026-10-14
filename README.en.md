@@ -150,3 +150,13 @@ Administrators and teachers select a textbook/grade graph in Graph Management (å
 | Teacher / student | Review learning reports and incorrect answers | Continue targeted practice |
 
 Screenshots show the current application and a mathematics demo graph, without real student records.
+
+## Agent Management and Storyboard Explanations
+
+- **Agent management:** configuration, a code-defined tool catalog, tool bindings, dry runs and call logs. Orchestration is stored as data; backend authorization continues to enforce the current user's data scope.
+- **Teaching content:** structured explanation storyboards and a segment-by-segment reader connect narration to visual actions. Teachers can preview storyboards in content management; students read them in knowledge-point content.
+- **Database changes:** new agent configuration, binding and call-log tables, plus teaching-content fields. Back up existing databases and ensure the service account can execute schema.sql and migration.sql before updating.
+
+Administrators inspect agents/tools and maintain permitted orchestration settings. Teachers generate or inspect explanations; students read the resulting segments. Visible controls and actions depend on role permissions. AI generation uses backend LLM environment variables; keep actual API keys out of source and Git.
+
+verify-storyboard.py and e2e-storyboard.js are development checks that may require running services and demo data. Review their settings first. docs/verify-storyboard-result.txt is an existing verification record, not proof that a new deployment passes automatically.

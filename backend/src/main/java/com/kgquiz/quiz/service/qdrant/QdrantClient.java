@@ -35,9 +35,31 @@ public class QdrantClient {
         return kgProperties.getQdrant().isEnabled();
     }
 
-    /** 确保 collection 存在（幂等） */
+    /**
+     * 确保 collection 存在（幂等）。
+     *
+     * <p>历史 bug：直接 PUT 建集合，集合已存在时 Qdrant 返回 409，被当成失败并打
+     * 「语义检索不可用」的 WARN —— 但集合其实一直可用，等于每次启动都报假警，
+     * 真正的连接故障反而被淹没。这里改成先探测再决定是否创建。</p>
+     */
     @SuppressWarnings("unchecked")
     public void ensureCollection(int dim) {
+        // 1. 先探测：已存在直接返回，不打扰
+        try {
+            Map<String, Object> info = restClient.get()
+                    .uri(base() + "/collections/" + collection())
+                    .retrieve()
+                    .body(Map.class);
+            if (info != null) {
+                Object status = info.get("result") instanceof Map<?, ?> r ? r.get("status") : null;
+                log.info("Qdrant collection {} 已就绪（状态 {}），跳过创建", collection(), status);
+                return;
+            }
+        } catch (Exception e) {
+            log.debug("collection {} 探测未命中，尝试创建: {}", collection(), e.getMessage());
+        }
+
+        // 2. 不存在则创建；409 视为并发下别人已建好，同样算就绪
         Map<String, Object> body = Map.of(
                 "vectors", Map.of(
                         "size", dim,
@@ -49,9 +71,14 @@ public class QdrantClient {
                     .body(body)
                     .retrieve()
                     .toBodilessEntity();
-            log.info("Qdrant collection {} 就绪", collection());
+            log.info("Qdrant collection {} 创建完成，语义检索可用", collection());
         } catch (Exception e) {
-            log.warn("Qdrant collection 初始化失败，语义检索不可用: {}", e.getMessage());
+            if (String.valueOf(e.getMessage()).contains("409")) {
+                log.info("Qdrant collection {} 已存在（409），语义检索可用", collection());
+                return;
+            }
+            // 这里才是真的不可用：连不上、鉴权错、维度冲突等
+            log.warn("Qdrant collection {} 创建失败，语义检索不可用: {}", collection(), e.getMessage());
         }
     }
 

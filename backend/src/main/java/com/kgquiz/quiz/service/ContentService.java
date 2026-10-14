@@ -10,6 +10,10 @@ import com.kgquiz.quiz.entity.NodeContent;
 import com.kgquiz.quiz.entity.Question;
 import com.kgquiz.quiz.mapper.NodeContentMapper;
 import com.kgquiz.quiz.service.neo4j.GraphStore;
+import com.kgquiz.quiz.storyboard.Storyboard;
+import com.kgquiz.quiz.storyboard.StoryboardChecker;
+import com.kgquiz.quiz.storyboard.StoryboardCodec;
+import com.kgquiz.quiz.storyboard.StoryboardRenderer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,13 +37,25 @@ import java.util.Map;
 public class ContentService {
 
     private static final List<String> ALL_TYPES = List.of(
-            NodeContent.T_LECTURE, NodeContent.T_EXAMPLE, NodeContent.T_MICRO_LESSON, NodeContent.T_CARD);
+            NodeContent.T_EXPLAIN, NodeContent.T_LECTURE, NodeContent.T_EXAMPLE,
+            NodeContent.T_MICRO_LESSON, NodeContent.T_CARD, NodeContent.T_LESSON_PLAN);
 
     private static final Map<String, String> TYPE_LABEL = Map.of(
+            NodeContent.T_EXPLAIN, "讲解分镜",
             NodeContent.T_LECTURE, "讲义",
             NodeContent.T_EXAMPLE, "例题精讲",
             NodeContent.T_MICRO_LESSON, "微课脚本",
-            NodeContent.T_CARD, "知识卡片");
+            NodeContent.T_CARD, "知识卡片",
+            NodeContent.T_LESSON_PLAN, "教案");
+
+    /**
+     * 走讲解 IR 路径的类型。
+     *
+     * <p>这两个类型不在这里直接生成正文，而是先产出 IR（{@link StoryboardService}），
+     * 再由渲染器投影出 body。这样「每个知识点一个讲解」与「教案参考讲解」才成立。</p>
+     */
+    private static final List<String> IR_TYPES = List.of(
+            NodeContent.T_EXPLAIN, NodeContent.T_LESSON_PLAN);
 
     /** 仅用于把库里存成 JSON 数组字符串的题目选项还原成列表 */
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -48,6 +64,7 @@ public class ContentService {
     private final GraphStore graphStore;
     private final NodeContextService nodeContextService;
     private final LlmClient llm;
+    private final StoryboardService storyboardService;
 
     /** 合法的内容类型，供 Controller 校验 */
     public List<String> types() {
@@ -124,11 +141,17 @@ public class ContentService {
         return result;
     }
 
-    /** 学生视角：只返回已发布内容 */
+    /**
+ * 学生视角：只返回已发布内容。
+     *
+     * <p>教案（{@link NodeContent#T_LESSON_PLAN}）对教师可见、对学生不可见——
+     * 它是备课产物，不是学习材料。</p>
+     */
     public List<Map<String, Object>> studentContents(Long nodeId) {
         return nodeContentMapper.selectList(new LambdaQueryWrapper<NodeContent>()
                         .eq(NodeContent::getNodeId, nodeId)
                         .eq(NodeContent::getStatus, NodeContent.S_PUBLISHED)
+                        .ne(NodeContent::getType, NodeContent.T_LESSON_PLAN)
                         .orderByAsc(NodeContent::getType)
                         .orderByDesc(NodeContent::getId))
                 .stream().map(this::toView).toList();
@@ -160,6 +183,10 @@ public class ContentService {
         String t = type == null || type.isBlank() ? NodeContent.T_LECTURE : type.trim().toUpperCase();
         if (!ALL_TYPES.contains(t)) {
             throw new BizException("不支持的内容类型: " + type + "（可选 " + String.join(" / ", ALL_TYPES) + "）");
+        }
+        // 教案与讲解走 IR 路径：先产 IR，再投影正文，其余类型仍是原来的直接生成
+        if (IR_TYPES.contains(t)) {
+            return generateFromStoryboard(nodeId, t, extraInstruction, replaceExisting);
         }
 
         String body;
@@ -223,6 +250,159 @@ public class ContentService {
         return result;
     }
 
+    /**
+     * 讲解 / 教案的生成：IR 优先，正文由 IR 投影。
+     *
+     * <p>教案不自己产 IR，而是<b>引用同知识点的讲解 IR</b>——这正是"教师创建教案时
+     * 参考讲解"的落地方式：改一次讲解，讲案跟着变，不会出现两套说法。</p>
+     */
+    private Map<String, Object> generateFromStoryboard(Long nodeId, String type, String extra,
+                                                       boolean replaceExisting) {
+        NodeContextService.NodeContext ctx = nodeContextService.of(nodeId);
+        UserContext.checkOrgScope(ctx.node().getOrgId());
+
+        Storyboard sb;
+        Map<Long, Question> questions;
+        Map<String, Object> check;
+        String generatedBy;
+        String model = "";
+        String body;
+        String storyboardJson = null;
+        NodeContent source = null;
+
+        if (NodeContent.T_LESSON_PLAN.equals(type)) {
+            // 教案：引用已有讲解 IR，缺讲解时现生成一份，避免"没讲解就没教案"
+            source = storyboardService.findExplain(nodeId);
+            if (source != null) {
+                sb = StoryboardCodec.read(source.getStoryboard());
+                questions = questionMapOf(ctx);
+            } else {
+                log.info("知识点 {} 尚无讲解 IR，为生成教案先产一份", nodeId);
+                StoryboardService.Generated g = storyboardService.generate(nodeId, extra);
+                sb = g.storyboard;
+                questions = g.questions;
+                check = g.check;
+                generatedBy = g.generatedBy;
+                model = g.model;
+                body = StoryboardRenderer.toLessonPlan(sb, questions, extra);
+                storyboardJson = null; // 教案不自带 IR，它引用讲解那份
+                return persistIrResult(ctx, type, body, storyboardJson, check, generatedBy, model,
+                        replaceExisting, source == null
+                                ? "该知识点原本没有讲解，已先自动生成一份讲解 IR 作为教案依据。"
+                                : "教案已按本知识点的讲解分镜生成。");
+            }
+            check = readCheckReport(source);
+            // 教案不自带 IR，分段数要沿用被引用的那份讲解，否则摘要会写「0分段」
+            if (sb != null) {
+                check = new LinkedHashMap<>(check);
+                check.put("segmentCount", sb.segmentCount());
+            }
+            generatedBy = NodeContent.BY_TEMPLATE; // 教案是 IR 的确定性渲染，不经大模型
+            body = StoryboardRenderer.toLessonPlan(sb, questions, extra);
+        } else {
+            // 讲解：现生成 IR
+            StoryboardService.Generated g = storyboardService.generate(nodeId, extra);
+            sb = g.storyboard;
+            questions = g.questions;
+            check = g.check;
+            generatedBy = g.generatedBy;
+            model = g.model;
+            storyboardJson = g.storyboardJson();
+            body = g.markdown();
+        }
+        return persistIrResult(ctx, type, body, storyboardJson, check, generatedBy, model,
+                replaceExisting, null);
+    }
+
+    /**
+     * 落库（IR 路径）。
+     *
+     * <p>自检有 ERROR 时仍会落草稿，但打上 {@code needsReview=1}——
+     * 前端会显示"待人工复核"，教师确认后才允许发布。这样既不丢生成结果，
+     * 又不会把明显错误的内容自动放行到学生端。</p>
+     */
+    private Map<String, Object> persistIrResult(NodeContextService.NodeContext ctx, String type,
+                                                String body, String storyboardJson,
+                                                Map<String, Object> check, String generatedBy,
+                                                String model, boolean replaceExisting, String notice) {
+        Long nodeId = ctx.node().getId();
+        int version = 1;
+        if (replaceExisting) {
+            List<NodeContent> exists = nodeContentMapper.selectList(new LambdaQueryWrapper<NodeContent>()
+                    .eq(NodeContent::getNodeId, nodeId).eq(NodeContent::getType, type));
+            if (!exists.isEmpty()) {
+                version = exists.stream().mapToInt(c -> c.getVersion() == null ? 1 : c.getVersion())
+                        .max().orElse(1) + 1;
+                for (NodeContent old : exists) {
+                    old.setStatus(NodeContent.S_DRAFT);
+                    nodeContentMapper.updateById(old);
+                }
+            }
+        }
+        CurrentUser me = UserContext.peek();
+        NodeContent content = new NodeContent();
+        content.setOrgId(ctx.node().getOrgId());
+        content.setGraphId(ctx.node().getGraphId());
+        content.setNodeId(nodeId);
+        content.setType(type);
+        content.setTitle(ctx.node().getName() + " · " + TYPE_LABEL.get(type));
+        content.setSummary(summaryOf(type, check, generatedBy));
+        content.setBody(body);
+        content.setStoryboard(storyboardJson);
+        content.setCheckReport(StoryboardChecker.toJson(check));
+        content.setNeedsReview(Boolean.TRUE.equals(check.get("needsReview")) ? 1 : 0);
+        content.setGeneratedBy(generatedBy);
+        content.setModel(model);
+        content.setVersion(version);
+        content.setStatus(NodeContent.S_DRAFT);
+        content.setCreatedBy(me == null ? null : me.userId());
+        nodeContentMapper.insert(content);
+
+        Map<String, Object> result = toView(content);
+        result.put("llmUsed", NodeContent.BY_LLM.equals(generatedBy));
+        result.put("check", check);
+        result.put("notice", notice != null ? notice
+                : (NodeContent.BY_LLM.equals(generatedBy) ? "已生成讲解分镜，待复核后发布"
+                : TYPE_LABEL.get(type) + "已用规则模板生成"));
+        return result;
+    }
+
+    private Map<Long, Question> questionMapOf(NodeContextService.NodeContext ctx) {
+        Map<Long, Question> m = new LinkedHashMap<>();
+        for (Question q : ctx.questions()) {
+            m.put(q.getId(), q);
+        }
+        return m;
+    }
+
+    private Map<String, Object> readCheckReport(NodeContent source) {
+        if (source == null || source.getCheckReport() == null) {
+            return Map.of("passed", true, "needsReview", false, "issues", List.of());
+        }
+        try {
+            return MAPPER.readValue(source.getCheckReport(), Map.class);
+        } catch (Exception e) {
+            return Map.of("passed", true, "needsReview", false, "issues", List.of());
+        }
+    }
+
+    private String summaryOf(String type, Map<String, Object> check, String generatedBy) {
+        boolean review = Boolean.TRUE.equals(check.get("needsReview"));
+        // 分段数从 IR 摘要里取；教案是引用渲染、没有自己的 IR，取不到时就不写这一段，
+        // 免得出现「0分段」这种自相矛盾的文案
+        Object segCount = check.get("segmentCount");
+        StringBuilder s = new StringBuilder(TYPE_LABEL.get(type));
+        s.append("（").append(NodeContent.BY_LLM.equals(generatedBy) ? "大模型生成" : "规则模板生成");
+        if (segCount != null) {
+            s.append("，").append(segCount).append(" 个分段");
+        }
+        s.append("）");
+        if (review) {
+            s.append("；自检发现 ").append(check.get("errorCount")).append(" 处问题，待人工复核");
+        }
+        return s.toString();
+    }
+
     /** 批量生成：给整张图谱的所有知识点（或仅缺内容的知识点）生成指定类型 */
     @Transactional
     public Map<String, Object> batchGenerate(Long graphId, List<String> types, boolean onlyMissing,
@@ -275,6 +455,134 @@ public class ContentService {
 
     // ==================== 编辑与发布 ====================
 
+    /**
+     * 用讲解 IR 重新渲染正文。
+     *
+     * <p>IR 是真源，body 只是投影，所以改了 IR（或换了引用它的题目）之后，
+     * 正文和教案都要能一键重投影，否则 IR 与投影会悄悄漂移。</p>
+     *
+     * @param explainContentId 讲解内容 id；不传则取该知识点最新的讲解
+     * @param rerenderPlan     是否连带重渲染引用了该讲解的教案
+     */
+    @Transactional
+    public Map<String, Object> rerender(Long contentId, Long explainContentId, boolean rerenderPlan) {
+        NodeContent target = get(contentId);
+        NodeContent explain = explainContentId != null
+                ? get(explainContentId)
+                : storyboardService.findExplain(target.getNodeId());
+        if (explain == null) {
+            throw new BizException("该知识点还没有讲解，无法渲染");
+        }
+        if (!NodeContent.T_EXPLAIN.equals(explain.getType())) {
+            throw new BizException("指定的不是讲解内容（应为 EXPLAIN）");
+        }
+        Storyboard sb = StoryboardCodec.read(explain.getStoryboard());
+        if (sb == null) {
+            throw new BizException("讲解内容里没有可用的分镜 IR");
+        }
+        NodeContextService.NodeContext ctx = nodeContextService.of(target.getNodeId());
+        Map<Long, Question> questions = questionMapOf(ctx);
+
+        String body = NodeContent.T_LESSON_PLAN.equals(target.getType())
+                ? StoryboardRenderer.toLessonPlan(sb, questions, null)
+                : StoryboardRenderer.toMarkdown(sb, questions);
+        target.setBody(body);
+        target.setGeneratedBy(NodeContent.BY_TEACHER);
+        nodeContentMapper.updateById(target);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("content", toView(target));
+        result.put("explainContentId", explain.getId());
+
+        int plans = 0;
+        if (rerenderPlan) {
+            List<NodeContent> planList = nodeContentMapper.selectList(new LambdaQueryWrapper<NodeContent>()
+                    .eq(NodeContent::getNodeId, target.getNodeId())
+                    .eq(NodeContent::getType, NodeContent.T_LESSON_PLAN));
+            for (NodeContent p : planList) {
+                p.setBody(StoryboardRenderer.toLessonPlan(sb, questions, null));
+                p.setGeneratedBy(NodeContent.BY_TEACHER);
+                p.setUpdatedAt(java.time.LocalDateTime.now());
+                nodeContentMapper.updateById(p);
+                plans++;
+            }
+        }
+        result.put("rerenderedPlans", plans);
+        return result;
+    }
+
+    /**
+     * 内容自检：对已落库的内容重跑一次门禁。
+     *
+     * <p>教师改完讲解后可以自己点一下「重新自检」，确认改动没有引入新问题
+     * （比如新加的题目 id 不属于本知识点）。</p>
+     */
+    public Map<String, Object> recheck(Long contentId) {
+        NodeContent content = get(contentId);
+        Storyboard sb = StoryboardCodec.read(content.getStoryboard());
+        if (sb == null) {
+            return Map.of("passed", false, "needsReview", true,
+                    "issues", List.of(Map.of("level", "ERROR", "code", "NO_IR",
+                            "message", "该内容没有讲解 IR，无法自检")));
+        }
+        NodeContextService.NodeContext ctx = nodeContextService.of(content.getNodeId());
+        Map<String, Object> check = StoryboardChecker.check(sb, questionMapOf(ctx));
+        content.setCheckReport(StoryboardChecker.toJson(check));
+        content.setNeedsReview(Boolean.TRUE.equals(check.get("needsReview")) ? 1 : 0);
+        nodeContentMapper.updateById(content);
+        Map<String, Object> result = new LinkedHashMap<>(check);
+        result.put("contentId", content.getId());
+        return result;
+    }
+
+    /**
+     * 学生端逐段讲解数据。
+     *
+     * <p>只取<b>已发布</b>的讲解；没发布就返回 {@code available=false}，
+     * 让前端显示"该知识点还没有讲解"而不是空白页。附带的题目只给题干与题型，
+     * 不给答案——答案在交卷判分时才出现。</p>
+     */
+    public Map<String, Object> studentStoryboard(Long nodeId) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        NodeContent explain = storyboardService.findExplain(nodeId);
+        boolean ok = explain != null
+                && NodeContent.S_PUBLISHED.equals(explain.getStatus());
+        result.put("available", ok);
+        if (!ok) {
+            result.put("hasDraft", explain != null);
+            result.put("reason", explain == null ? "该知识点还没有讲解内容"
+                    : "讲解内容尚未发布");
+            return result;
+        }
+        Storyboard sb = StoryboardCodec.read(explain.getStoryboard());
+        result.put("contentId", explain.getId());
+        result.put("nodeId", nodeId);
+        result.put("title", explain.getTitle());
+        result.put("summary", explain.getSummary());
+        result.put("storyboard", sb);
+        result.put("summaryInfo", StoryboardRenderer.toSummary(sb));
+
+        // 题目只给题干，答案不给
+        NodeContextService.NodeContext ctx = nodeContextService.of(nodeId);
+        List<Map<String, Object>> qMeta = new ArrayList<>();
+        for (Question q : ctx.questions()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", q.getId());
+            m.put("stem", q.getStem());
+            m.put("type", q.getQuestionType());
+            m.put("difficulty", q.getDifficulty());
+            qMeta.add(m);
+        }
+        result.put("questions", qMeta);
+        return result;
+    }
+
+    /**
+     * 教师手工编辑内容。
+     *
+     * <p>对讲解（EXPLAIN）额外做一次自检：正文被手改后可能与 IR 里的题目/答案脱节，
+     * 标记 {@code needsReview} 让教师知道该复核。</p>
+     */
     @Transactional
     public Map<String, Object> update(Long id, String title, String summary, String body) {
         NodeContent content = get(id);
@@ -286,20 +594,61 @@ public class ContentService {
         }
         if (body != null && !body.isBlank()) {
             content.setBody(body);
+            // 正文被手改后重新过一遍门禁：新增的题目引用 / 答案表述可能有误
+            Storyboard sb = StoryboardCodec.read(content.getStoryboard());
+            if (sb != null) {
+                NodeContextService.NodeContext ctx = nodeContextService.of(content.getNodeId());
+                Map<String, Object> check = StoryboardChecker.check(sb, questionMapOf(ctx));
+                content.setCheckReport(StoryboardChecker.toJson(check));
+                content.setNeedsReview(Boolean.TRUE.equals(check.get("needsReview")) ? 1 : 0);
+            }
         }
         content.setGeneratedBy(NodeContent.BY_TEACHER);
         nodeContentMapper.updateById(content);
         return toView(content);
     }
 
+    /**
+     * 发布 / 撤回。
+     *
+     * <p><b>硬边界</b>：自检存在 ERROR 级问题（needsReview=1）时拒绝发布。
+     * 这就是「花钱/落库前拦一道」的意义所在——错误内容不能流到学生手上。
+     * 教师要先改对、重新自检通过，才能发布。</p>
+     */
     @Transactional
     public Map<String, Object> setStatus(Long id, String status) {
         NodeContent content = get(id);
         String s = NodeContent.S_PUBLISHED.equalsIgnoreCase(status)
                 ? NodeContent.S_PUBLISHED : NodeContent.S_DRAFT;
+        if (NodeContent.S_PUBLISHED.equals(s) && content.getNeedsReview() != null
+                && content.getNeedsReview() == 1) {
+            Map<String, Object> check = parseCheck(content.getCheckReport());
+            throw new BizException("内容自检未通过，已阻止发布。请先修正问题并重新自检："
+                    + briefIssues(check));
+        }
         content.setStatus(s);
         nodeContentMapper.updateById(content);
         return toView(content);
+    }
+
+    private String briefIssues(Map<String, Object> check) {
+        Object issues = check.get("issues");
+        if (!(issues instanceof List<?> list) || list.isEmpty()) {
+            return "详见自检报告";
+        }
+        StringBuilder sb = new StringBuilder();
+        int n = 0;
+        for (Object o : list) {
+            if (n >= 3) {
+                sb.append(" 等 ").append(list.size()).append(" 项");
+                break;
+            }
+            if (o instanceof Map<?, ?> m) {
+                sb.append("[").append(m.get("message")).append("] ");
+            }
+            n++;
+        }
+        return sb.toString();
     }
 
     @Transactional
@@ -490,9 +839,26 @@ public class ContentService {
         m.put("model", c.getModel());
         m.put("version", c.getVersion());
         m.put("status", c.getStatus());
+        m.put("needsReview", c.getNeedsReview() != null && c.getNeedsReview() == 1);
+        // IR 结构给前端做逐段阅读与视觉锚点；正文仍是 IR 的 Markdown 投影
+        Storyboard sb = StoryboardCodec.read(c.getStoryboard());
+        m.put("storyboard", sb);
+        m.put("storyboardSummary", StoryboardRenderer.toSummary(sb));
+        m.put("check", parseCheck(c.getCheckReport()));
         m.put("createdAt", c.getCreatedAt());
         m.put("updatedAt", c.getUpdatedAt());
         return m;
+    }
+
+    private Map<String, Object> parseCheck(String json) {
+        if (notBlank(json)) {
+            try {
+                return MAPPER.readValue(json, Map.class);
+            } catch (Exception ignored) {
+                // 自检报告解析失败不该阻断内容展示，降级成"无报告"
+            }
+        }
+        return Map.of("passed", true, "needsReview", false, "issues", List.of());
     }
 
     private static String firstLine(String body) {

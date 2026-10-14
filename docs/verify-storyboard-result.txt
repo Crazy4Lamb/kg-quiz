@@ -1,0 +1,71 @@
+
+[1] 内容类型注册
+  PASS  含 EXPLAIN（讲解分镜）
+  PASS  含 LESSON_PLAN（教案）
+  PASS  教案标签为「教案」
+
+[2] 讲解 IR 生成
+  PASS  生成成功
+  PASS  带 storyboard IR
+  PASS  分段数 >= 5
+  PASS  index 从 1 连续
+  PASS  kind 覆盖 HOOK/TEACH/RECAP
+  PASS  每段有旁白
+  PASS  视觉锚点用相对位置（anchorLine 而非绝对秒）
+  PASS  引用题目 id 均真实存在
+  PASS  自检通过
+  PASS  needsReview=false
+  PASS  摘要分段数不为 0
+
+[3] 教案引用讲解 IR
+  PASS  教案生成成功
+  PASS  教案不自带 storyboard
+  PASS  教案含 ## 课题
+  PASS  教案含 ## 教学目标
+  PASS  教案含 ## 教学重点与难点
+  PASS  教案含 ## 教学过程
+  PASS  教案含 ## 作业布置
+  PASS  教案过程引用了讲解分段数
+  PASS  教案摘要分段数不为 0
+
+[4] 发布门禁
+  PASS  自检通过可发布
+
+[5] 教案对学生不可见
+  PASS  学生拿不到教案
+  PASS  学生能看到已发布讲解
+
+[6] 学生端分镜接口
+  PASS  学生可读分镜
+  PASS  返回 5 段
+  PASS  题目不含答案字段
+
+[7] 自检门禁真能拦住幻觉（注入 → 检出 → 拒绝发布）
+  PASS  检出编造的题目 id
+  PASS  标为 needsReview
+  PASS  问题类型是 QUESTION_SCOPE
+  PASS  被污染内容拒绝发布（400）
+  PASS  拒绝原因可读
+  PASS  重生成后恢复干净
+
+[8] 答案一致性检查
+  PASS  检出画面答案与题库不一致
+
+[9] 重渲染（IR → 正文投影）
+  PASS  重渲染成功
+  PASS  连带重渲染教案 >= 1 份
+
+[10] 权限边界
+  PASS  学生读内容管理接口 403
+  PASS  学生生成内容 403
+  PASS  学生触发自检 403
+
+[11] Agent 管理台（上一轮遗留）
+  PASS  工具注册表可读
+  PASS  三个种子 Agent 就位
+  PASS  学生读 Agent 配置 403
+  PASS  教师可读工具注册表
+
+========================================================
+PASS=45  FAIL=0
+全部通过 ✅

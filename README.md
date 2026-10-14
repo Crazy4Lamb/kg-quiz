@@ -167,6 +167,16 @@ start-*.bat    原开发电脑的 Windows 启动脚本
 
 截图来自当前项目界面；展示的是数学演示图谱，不包含真实学生记录。
 
+## Agent 管理与分镜讲解
+
+- **Agent 管理**：新增 Agent 配置、工具注册表与工具绑定、运行预演及调用记录。工具定义由代码提供，编排配置保存在数据库；数据权限仍由后端按当前用户实时校验。
+- **教学内容**：新增结构化讲解分镜及逐段阅读组件，将段落旁白与视觉动作关联；教师可在内容管理中查看分镜预览，学生在知识点内容中逐段阅读。
+- **数据库更新**：新增 Agent 配置、工具绑定与调用日志相关表，并扩展教学内容字段。启动前备份已有数据库，确认服务账号有执行 schema.sql / migration.sql 的权限。
+
+使用时，管理员在 Agent 管理入口查看配置与工具，按权限维护编排；教师在教学内容中生成或查看知识点讲解，学生在知识点页面阅读。具体可见入口和可操作范围由登录角色决定。AI 生成继续使用后端 LLM 环境变量，真实 API Key 不应写入源码或提交。
+
+新增 verify-storyboard.py 与 e2e-storyboard.js 用于开发验证，可能依赖运行服务和演示数据；执行前请检查脚本配置。docs/verify-storyboard-result.txt 是已有验证记录，不代表新部署环境自动通过检查。
+
 ---
 
 # English Guide
@@ -317,3 +327,13 @@ Administrators and teachers select a textbook/grade graph in Graph Management (�
 | Teacher / student | Review learning reports and incorrect answers | Continue targeted practice |
 
 Screenshots show the current application and a mathematics demo graph, without real student records.
+
+## Agent Management and Storyboard Explanations
+
+- **Agent management:** configuration, a code-defined tool catalog, tool bindings, dry runs and call logs. Orchestration is stored as data; backend authorization continues to enforce the current user's data scope.
+- **Teaching content:** structured explanation storyboards and a segment-by-segment reader connect narration to visual actions. Teachers can preview storyboards in content management; students read them in knowledge-point content.
+- **Database changes:** new agent configuration, binding and call-log tables, plus teaching-content fields. Back up existing databases and ensure the service account can execute schema.sql and migration.sql before updating.
+
+Administrators inspect agents/tools and maintain permitted orchestration settings. Teachers generate or inspect explanations; students read the resulting segments. Visible controls and actions depend on role permissions. AI generation uses backend LLM environment variables; keep actual API keys out of source and Git.
+
+verify-storyboard.py and e2e-storyboard.js are development checks that may require running services and demo data. Review their settings first. docs/verify-storyboard-result.txt is an existing verification record, not proof that a new deployment passes automatically.

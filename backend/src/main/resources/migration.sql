@@ -61,3 +61,10 @@ ALTER TABLE sys_user ADD INDEX idx_org (org_id);
 -- 交卷后走「覆盖式初始化掌握度」而不是 EMA 增量。字段本身是 VARCHAR，无需改结构。
 
 -- node_content / recommend_rule / learning_task 由 schema.sql 建出（幂等）。
+
+-- ========== 讲解 IR：node_content 从「只有 Markdown」升级为「IR + 渲染产物」============
+-- storyboard 存分镜中间表示（JSON），body 退化为它的一个渲染后端，不再是唯一真源。
+-- 一个知识点一份讲解 IR；教案（LESSON_PLAN）引用同一份 IR 的分段，不另起一套内容。
+ALTER TABLE node_content ADD COLUMN storyboard MEDIUMTEXT NULL COMMENT '讲解分镜 IR（JSON）：分段 + 旁白 + 画面 + 视觉动作锚点';
+ALTER TABLE node_content ADD COLUMN check_report TEXT        NULL COMMENT '内容自检报告（JSON）：不通过项 + 是否需人工复核';
+ALTER TABLE node_content ADD COLUMN needs_review  TINYINT     NOT NULL DEFAULT 0 COMMENT '自检未通过需人工复核，阻断自动发布';

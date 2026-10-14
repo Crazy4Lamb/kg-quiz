@@ -273,3 +273,53 @@ CREATE TABLE IF NOT EXISTS sys_token (
     KEY idx_user (user_id),
     KEY idx_expire (expire_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT '登录会话令牌';
+
+-- ========== Agent 配置域 ==========
+-- 三层边界：工具是代码（不入库）、编排是数据（本节落库）、权限是运行时算（由 UserContext 决定）。
+-- agent_profile 只描述「谁、用什么编排、什么模型」，不承载任何数据权限 —— 那是 Service 层的事。
+CREATE TABLE IF NOT EXISTS agent_profile (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    code          VARCHAR(64)  NOT NULL COMMENT '业务编码，唯一。种子用固定值便于引用',
+    org_id        BIGINT       NULL COMMENT '所属机构；NULL 表示平台级 Agent',
+    name          VARCHAR(64)  NOT NULL COMMENT 'Agent 名称',
+    description   VARCHAR(255) NOT NULL DEFAULT '' COMMENT '一句话说明它做什么',
+    target_role   VARCHAR(32)  NOT NULL DEFAULT 'STUDENT' COMMENT '面向角色：STUDENT / TEACHER / ADMIN',
+    system_prompt TEXT         NULL COMMENT '系统提示词（二期开放在线编辑）',
+    model         VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '模型标识，留空用后端默认',
+    temperature   DOUBLE       NOT NULL DEFAULT 0.3 COMMENT '采样温度',
+    max_tokens    INT          NOT NULL DEFAULT 2048 COMMENT '单次响应上限',
+    enabled       TINYINT      NOT NULL DEFAULT 1 COMMENT '1 启用 / 0 停用',
+    created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_code (code),
+    KEY idx_org (org_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT 'Agent 编排配置';
+
+-- Agent 与工具的绑定。注意：本表只决定「看不看得到这个工具」，
+-- 绝不决定「能访问哪些数据」—— 后者永远由 Service 层按 UserContext 实时算。
+CREATE TABLE IF NOT EXISTS agent_tool (
+    id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+    agent_id       BIGINT      NOT NULL,
+    tool_key       VARCHAR(64) NOT NULL COMMENT '工具标识，对应代码里的工具目录',
+    enabled        TINYINT     NOT NULL DEFAULT 1 COMMENT '1 启用 / 0 停用',
+    param_override TEXT        NULL COMMENT '工具级参数覆盖 JSON，如 {"minConfidence":0.6}',
+    sort_order     INT         NOT NULL DEFAULT 0 COMMENT '排序，越小越靠前',
+    UNIQUE KEY uk_agent_tool (agent_id, tool_key),
+    KEY idx_agent (agent_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT 'Agent 工具绑定';
+
+-- 工具调用观测：喂给工具注册表的「调用次数 / 成功率 / 平均耗时」
+CREATE TABLE IF NOT EXISTS agent_call_log (
+    id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+    agent_id          BIGINT      NULL COMMENT 'Agent，平台级巡检可为空',
+    tool_key          VARCHAR(64) NOT NULL,
+    operator_user_id  BIGINT      NULL COMMENT '发起者',
+    target_student_id BIGINT      NULL COMMENT '预演时的目标学生（真实调用为会话学生）',
+    ok                TINYINT     NOT NULL DEFAULT 1,
+    cost_ms           BIGINT      NOT NULL DEFAULT 0,
+    error             VARCHAR(255) NULL,
+    created_at        DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_tool (tool_key),
+    KEY idx_agent (agent_id),
+    KEY idx_created (created_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT 'Agent 工具调用观测';
