@@ -68,3 +68,41 @@ ALTER TABLE sys_user ADD INDEX idx_org (org_id);
 ALTER TABLE node_content ADD COLUMN storyboard MEDIUMTEXT NULL COMMENT '讲解分镜 IR（JSON）：分段 + 旁白 + 画面 + 视觉动作锚点';
 ALTER TABLE node_content ADD COLUMN check_report TEXT        NULL COMMENT '内容自检报告（JSON）：不通过项 + 是否需人工复核';
 ALTER TABLE node_content ADD COLUMN needs_review  TINYINT     NOT NULL DEFAULT 0 COMMENT '自检未通过需人工复核，阻断自动发布';
+
+-- ========== 大模型接入配置（运行时可改，不必重启）============
+-- org_id 为 NULL 是平台默认，机构可覆盖；解析顺序 机构行 > 平台行 > 环境变量/yaml。
+-- api_key 明文存储是 Demo 期的取舍：换来运行期可换厂商。生产应改 KMS 加密或独立密钥管理服务。
+-- 无论哪种，该字段都不出现在任何接口响应里（管理台只回掩码）。
+CREATE TABLE IF NOT EXISTS llm_config (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    org_id          BIGINT      NULL COMMENT '所属机构；NULL = 平台默认配置',
+    preset_code     VARCHAR(64)  NOT NULL DEFAULT 'CUSTOM' COMMENT '预设编码，见 LlmPresetCatalog',
+    vendor          VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '厂商名，预设回填',
+    protocol        VARCHAR(32)  NOT NULL DEFAULT 'OPENAI' COMMENT 'OPENAI/ANTHROPIC/GEMINI/OLLAMA/VOLCENGINE',
+    auth            VARCHAR(32)  NOT NULL DEFAULT 'BEARER' COMMENT 'BEARER/HEADER/QUERY_KEY/GOOG_HEADER/NONE/CUSTOM_HEADER',
+    auth_header     VARCHAR(128) NULL     COMMENT 'CUSTOM_HEADER 时的 header 名',
+    base_url        VARCHAR(255) NOT NULL DEFAULT '' COMMENT '服务根地址，不含 chat-path',
+    chat_path       VARCHAR(255) NOT NULL DEFAULT '/v1/chat/completions' COMMENT '端点路径；Gemini 保留 {model} 占位',
+    api_key         VARCHAR(512) NULL     COMMENT '密钥明文；见表头注释说明取舍',
+    model           VARCHAR(128) NOT NULL DEFAULT '' COMMENT '模型标识',
+    timeout_seconds INT          NOT NULL DEFAULT 90,
+    max_tokens      INT          NOT NULL DEFAULT 2400,
+    temperature     DOUBLE       NOT NULL DEFAULT 0.3,
+    enabled         TINYINT      NOT NULL DEFAULT 1 COMMENT '1 启用 / 0 停用；停用后回落环境变量',
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_org (org_id),
+    KEY idx_enabled (enabled)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT '大模型接入配置（运行时可改）';
+
+-- ========== Agent 生效范围下探到校区 / 班级 ==========
+-- 四档范围：平台级（org_id=NULL）→ 机构级 → 校区级 → 班级级。
+-- 这决定「在哪里启用这个 Agent」，不决定「能读哪些数据」——后者永远由 UserContext 实时算。
+ALTER TABLE agent_profile ADD COLUMN campus_id BIGINT NULL COMMENT '生效校区；NULL 表示机构内全部校区';
+ALTER TABLE agent_profile ADD COLUMN clazz_id  BIGINT NULL COMMENT '生效班级；NULL 表示校区/机构内全部班级';
+ALTER TABLE agent_profile ADD INDEX idx_scope (org_id, campus_id, clazz_id);
+
+-- ========== 组织管理层级：班级分层 ==========
+-- 一层自引用，表达「平行班 / 实验班挂在常规班下」。不支持多深，见 ClazzReq#parentClazzId。
+ALTER TABLE clazz ADD COLUMN parent_clazz_id BIGINT NULL COMMENT '上级班级（自引用，仅一层）';
+ALTER TABLE clazz ADD INDEX idx_parent_clazz (parent_clazz_id);

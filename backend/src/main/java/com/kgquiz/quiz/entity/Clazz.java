@@ -38,6 +38,14 @@ public class Clazz {
     /** 班主任 sys_user.id */
     private Long headTeacherId;
 
+    /**
+     * 上级班级（自引用，仅一层）。
+     *
+     * <p>表达「平行班 / 实验班挂在常规班下」这类分层关系。非空即子班，为空即顶级班。
+     * 只支持一层是有意的：真正的教学分层就是两级，再深就变成组织架构而不是班级了。</p>
+     */
+    private Long parentClazzId;
+
     /** ACTIVE 在读 / ARCHIVED 归档 */
     private String status;
 

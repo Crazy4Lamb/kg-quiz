@@ -51,10 +51,12 @@ CREATE TABLE IF NOT EXISTS clazz (
     textbook        VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '教材版本',
     term            VARCHAR(32)  NOT NULL DEFAULT '' COMMENT '学期',
     head_teacher_id BIGINT       NULL COMMENT '班主任 sys_user.id',
+    parent_clazz_id BIGINT       NULL COMMENT '上级班级（自引用，仅一层：平行班/实验班挂在常规班下）',
     status          VARCHAR(16)  NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE 在读 / ARCHIVED 归档',
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_campus (campus_id),
-    KEY idx_org (org_id)
+    KEY idx_org (org_id),
+    KEY idx_parent_clazz (parent_clazz_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT '班级';
 
 CREATE TABLE IF NOT EXISTS teacher_clazz (
@@ -276,11 +278,20 @@ CREATE TABLE IF NOT EXISTS sys_token (
 
 -- ========== Agent 配置域 ==========
 -- 三层边界：工具是代码（不入库）、编排是数据（本节落库）、权限是运行时算（由 UserContext 决定）。
--- agent_profile 只描述「谁、用什么编排、什么模型」，不承载任何数据权限 —— 那是 Service 层的事。
+-- agent_profile 只描述「谁、用什么编排、什么模型、在哪里启用」，不承载任何数据权限 —— 那是 Service 层的事。
+--
+-- 生效范围（org_id + campus_id + clazz_id 三列从粗到细，只允许「最细的那列有值」）：
+--   org_id=NULL                   → 平台级，全平台生效
+--   org_id=X, campus_id=NULL      → 该机构全部校区
+--   org_id=X, campus_id=Y         → 该校区全部班级
+--   org_id=X, campus_id=Y, clazz_id=Z → 仅该班级
+-- 注意：这是「在哪里启用这个 Agent」，不是「能读哪些数据」。后者永远由 UserContext 实时算。
 CREATE TABLE IF NOT EXISTS agent_profile (
     id            BIGINT AUTO_INCREMENT PRIMARY KEY,
     code          VARCHAR(64)  NOT NULL COMMENT '业务编码，唯一。种子用固定值便于引用',
     org_id        BIGINT       NULL COMMENT '所属机构；NULL 表示平台级 Agent',
+    campus_id     BIGINT       NULL COMMENT '生效校区；NULL 表示机构内全部校区',
+    clazz_id      BIGINT       NULL COMMENT '生效班级；NULL 表示校区/机构内全部班级',
     name          VARCHAR(64)  NOT NULL COMMENT 'Agent 名称',
     description   VARCHAR(255) NOT NULL DEFAULT '' COMMENT '一句话说明它做什么',
     target_role   VARCHAR(32)  NOT NULL DEFAULT 'STUDENT' COMMENT '面向角色：STUDENT / TEACHER / ADMIN',
@@ -292,7 +303,8 @@ CREATE TABLE IF NOT EXISTS agent_profile (
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_code (code),
-    KEY idx_org (org_id)
+    KEY idx_org (org_id),
+    KEY idx_scope (org_id, campus_id, clazz_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT 'Agent 编排配置';
 
 -- Agent 与工具的绑定。注意：本表只决定「看不看得到这个工具」，

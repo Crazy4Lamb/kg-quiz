@@ -4,11 +4,14 @@ package com.kgquiz.quiz.dto;
  * 保存 Agent 编排配置。
  *
  * <p><b>注意这里没有任何「数据范围」字段</b> —— 那是后端鉴权的事，
- * 不该由配置决定。</p>
+ * 不该由配置决定。{@code campusId} / {@code clazzId} 表达的是
+ * 「这个 Agent 在哪里启用」，与「能读哪些数据」是两件事。</p>
  *
  * @param id            为空则新建；不为空则更新该条
  * @param code          业务编码（新建时必填，唯一）
  * @param orgId         归属机构；平台管理员不传则落平台级
+ * @param campusId      生效校区；为空表示机构内全部校区
+ * @param clazzId       生效班级；为空表示校区/机构内全部班级
  * @param name          名称
  * @param description   一句话说明
  * @param targetRole    面向角色 STUDENT / TEACHER / ADMIN
@@ -22,6 +25,8 @@ public record AgentSaveReq(
         Long id,
         String code,
         Long orgId,
+        Long campusId,
+        Long clazzId,
         String name,
         String description,
         String targetRole,

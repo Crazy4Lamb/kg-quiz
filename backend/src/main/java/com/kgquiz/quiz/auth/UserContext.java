@@ -105,8 +105,57 @@ public final class UserContext {
     }
 
     /**
-     * 班级范围校验：教师只能操作自己带的班；机构管理员与平台管理员不受此限
-     * （机构边界由 {@link #checkOrgScope} 兜底）。
+     * 当前账号可见的校区范围：返回具体校区表示只能看这个校区，返回 {@code null} 表示不按校区过滤。
+     *
+     * <p>与 {@link #scopeOrgId()} 的区别：这个方法<b>不做 403</b>，它只是把范围算出来给查询用；
+     * 真正的拦截在 {@link #checkCampusScope(Long)}。写成两个方法是为了让「列表过滤」
+     * 和「单项校验」用同一套范围计算，不会各写一份判断而漏掉一边。</p>
+     */
+    public static Long scopeCampusId() {
+        CurrentUser user = require();
+        // 平台管理员 / 机构管理员 / 未挂校区的教师：不做校区过滤
+        if (user.isAdmin() || user.isOrgAdmin()) {
+            return null;
+        }
+        return user.campusId();
+    }
+
+    /**
+     * 目标校区是否在当前账号的可见范围内；越界一律 403。
+     *
+     * <p>两条硬规则：</p>
+     * <ul>
+     *   <li>校区管理员<b>必须</b>绑定 campusId。没绑定就直接 403 ——
+     *       放行的后果是他能改整个机构的班级，这是典型的权限配置漏配导致的越权。</li>
+     *   <li>教师也受这条约束（只能操作自己校区的班级），
+     *       这是既有行为，之前散落在各处判断，这次收到统一入口。</li>
+     * </ul>
+     */
+    public static void checkCampusScope(Long targetCampusId) {
+        CurrentUser user = require();
+        if (user.isAdmin() || user.isOrgAdmin()) {
+            return;
+        }
+        if (user.isCampusAdmin() || user.role() == UserRole.TEACHER) {
+            if (user.campusId() == null) {
+                throw new ForbiddenException(user.isCampusAdmin()
+                        ? "当前校区管理员账号未绑定校区，请联系机构管理员重新分配"
+                        : "当前教师账号未归属校区，请联系机构管理员");
+            }
+            if (targetCampusId != null && !user.campusId().equals(targetCampusId)) {
+                throw new ForbiddenException(user.isCampusAdmin()
+                        ? "只能管理自己负责的校区"
+                        : "只能操作本校区下的班级");
+            }
+        }
+    }
+
+    /**
+     * 班级范围校验：教师只能操作自己带的班；校区管理员只能操作本校区的班；
+     * 机构管理员与平台管理员不受此限（机构边界由 {@link #checkOrgScope} 兜底）。
+     *
+     * <p>注意先过 {@link #checkCampusScope(Long)}：校区管理员虽然不是教师，
+     * 但班级数据同样必须落在他的校区内，否则就等于跨校区操作了。</p>
      */
     public static void checkClazzScope(Long clazzId) {
         CurrentUser user = require();

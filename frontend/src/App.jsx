@@ -6,7 +6,7 @@ import {
   ApartmentOutlined, SearchOutlined, TeamOutlined, FileTextOutlined, RocketOutlined,
   ReadOutlined, SettingOutlined, LogoutOutlined, UserOutlined, KeyOutlined, DownOutlined,
   BankOutlined, BulbOutlined, SlidersOutlined, AimOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-  RobotOutlined
+  RobotOutlined, CloudServerOutlined
 } from '@ant-design/icons';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { api, unwrap } from './api.js';
@@ -28,6 +28,7 @@ import NodeContent from './pages/NodeContent.jsx';
 import ContentManage from './pages/ContentManage.jsx';
 import RecommendRules from './pages/RecommendRules.jsx';
 import Agents from './pages/Agents.jsx';
+import LlmSettings from './pages/LlmSettings.jsx';
 import ThemePicker from './components/ThemePicker.jsx';
 
 const GraphEditor = lazy(() => import('./pages/GraphEditor.jsx'));
@@ -40,27 +41,28 @@ const { Sider, Header, Content } = Layout;
  * 系统运维只给管理员。后端 @RequireRole 是同一条边界的真实拦截。
  */
 const MENUS = [
-  { key: '/org', icon: <BankOutlined />, label: '机构管理', roles: [ROLE.ORG_ADMIN, ROLE.ADMIN] },
-  { key: '/graphs', icon: <ApartmentOutlined />, label: '图谱管理', roles: [ROLE.TEACHER, ROLE.ORG_ADMIN, ROLE.ADMIN] },
-  { key: '/search', icon: <SearchOutlined />, label: '图谱检索', roles: [ROLE.STUDENT, ROLE.TEACHER, ROLE.ORG_ADMIN, ROLE.ADMIN] },
-  { key: '/students', icon: <TeamOutlined />, label: '学生管理', roles: [ROLE.TEACHER, ROLE.ORG_ADMIN, ROLE.ADMIN] },
-  { key: '/questions', icon: <FileTextOutlined />, label: '题库管理', roles: [ROLE.TEACHER, ROLE.ORG_ADMIN, ROLE.ADMIN] },
-  { key: '/contents', icon: <BulbOutlined />, label: '教学内容', roles: [ROLE.TEACHER, ROLE.ORG_ADMIN, ROLE.ADMIN] },
+  { key: '/org', icon: <BankOutlined />, label: '组织管理', roles: [ROLE.ORG_ADMIN, ROLE.CAMPUS_ADMIN, ROLE.ADMIN] },
+  { key: '/graphs', icon: <ApartmentOutlined />, label: '图谱管理', roles: [ROLE.TEACHER, ROLE.CAMPUS_ADMIN, ROLE.ORG_ADMIN, ROLE.ADMIN] },
+  { key: '/search', icon: <SearchOutlined />, label: '图谱检索', roles: [ROLE.STUDENT, ROLE.TEACHER, ROLE.CAMPUS_ADMIN, ROLE.ORG_ADMIN, ROLE.ADMIN] },
+  { key: '/students', icon: <TeamOutlined />, label: '学生管理', roles: [ROLE.TEACHER, ROLE.CAMPUS_ADMIN, ROLE.ORG_ADMIN, ROLE.ADMIN] },
+  { key: '/questions', icon: <FileTextOutlined />, label: '题库管理', roles: [ROLE.TEACHER, ROLE.CAMPUS_ADMIN, ROLE.ORG_ADMIN, ROLE.ADMIN] },
+  { key: '/contents', icon: <BulbOutlined />, label: '教学内容', roles: [ROLE.TEACHER, ROLE.CAMPUS_ADMIN, ROLE.ORG_ADMIN, ROLE.ADMIN] },
   {
     key: '/exams', icon: <RocketOutlined />, label: '出题中心',
     labelByRole: { STUDENT: '我的作业' },
-    roles: [ROLE.STUDENT, ROLE.TEACHER, ROLE.ORG_ADMIN, ROLE.ADMIN]
+    roles: [ROLE.STUDENT, ROLE.TEACHER, ROLE.CAMPUS_ADMIN, ROLE.ORG_ADMIN, ROLE.ADMIN]
   },
   { key: '/my', icon: <ReadOutlined />, label: '我的学习', roles: [ROLE.STUDENT] },
   { key: '/my/diagnosis', icon: <AimOutlined />, label: '学习诊断', roles: [ROLE.STUDENT] },
   { key: '/recommend-rules', icon: <SlidersOutlined />, label: '推荐规则', roles: [ROLE.ORG_ADMIN, ROLE.ADMIN] },
   { key: '/agents', icon: <RobotOutlined />, label: 'Agent 管理', roles: [ROLE.ORG_ADMIN, ROLE.ADMIN] },
+  { key: '/llm-settings', icon: <CloudServerOutlined />, label: '大模型接入', roles: [ROLE.ORG_ADMIN, ROLE.ADMIN] },
   { key: '/admin', icon: <SettingOutlined />, label: '系统运维', roles: [ROLE.ADMIN] }
 ];
 
 const TITLES = {
   '/': '知识图谱 · 题库管理系统',
-  '/org': '机构管理平台',
+  '/org': '组织管理平台',
   '/graphs': '图谱管理',
   '/search': '图谱检索',
   '/students': '学生管理',
@@ -71,6 +73,7 @@ const TITLES = {
   '/my/diagnosis': '我的诊断报告',
   '/recommend-rules': '学习优先级推荐规则',
   '/agents': 'Agent 管理台',
+  '/llm-settings': '大模型接入',
   '/admin': '系统运维'
 };
 
@@ -86,6 +89,7 @@ const DESCRIPTIONS = {
   '/my/diagnosis': '了解你的学习起点，找到适合自己的节奏。',
   '/recommend-rules': '为不同的学习起点，安排合适的下一步。',
   '/agents': '把工具、编排与权限分开管，让 Agent 行为可控可查。',
+  '/llm-settings': '接哪个模型、什么协议，在管理台点一下即生效。',
   '/admin': '让每一次教与学，都顺畅发生。'
 };
 
@@ -245,10 +249,16 @@ function Shell({ session, onLogout }) {
                 <Route path="/contents" element={<ContentManage />} />
                 <Route path="/recommend-rules" element={<RecommendRules />} />
                 <Route path="/agents" element={<Agents />} />
+                <Route path="/llm-settings" element={<LlmSettings />} />
               </>
             )}
 
-            {(user.role === ROLE.ADMIN || user.role === ROLE.ORG_ADMIN) && (
+            {/* 校区管理员与机构管理员共用组织管理页 ——
+                路由条件必须和侧边栏菜单的 roles 保持一致。
+                两边不一致时症状是「菜单看得见、点进去白屏」：
+                匹配不到路由 → 落到 * → Navigate 回首页 → 首页又是 /org → 死循环。 */}
+            {(user.role === ROLE.ADMIN || user.role === ROLE.ORG_ADMIN
+              || user.role === ROLE.CAMPUS_ADMIN) && (
               <Route path="/org" element={<OrgConsole />} />
             )}
 

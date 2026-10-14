@@ -34,8 +34,8 @@ kg:
     database: ${NEO4J_DATABASE:neo4j}
   qdrant:
     enabled: ${QDRANT_ENABLED:true}
-    # 你已有的 Qdrant 实例（192.168.0.69:6333，Qdrant 1.18.1）
-    url: ${QDRANT_URL:http://192.168.0.69:6333}
+    # 本机 Docker 的 qdrant 容器（0.0.0.0:6333）；切内网实例用 QDRANT_URL 覆盖
+    url: ${QDRANT_URL:http://127.0.0.1:6333}
     collection: kg_nodes
   embedding:
     enabled: ${KG_EMBEDDING_ENABLED:true}
@@ -44,15 +44,25 @@ kg:
     model-path: ${KG_EMBEDDING_MODEL:../models/bge-small-zh-v1.5.onnx}
     tokenizer-path: ${KG_EMBEDDING_TOKENIZER:../models/tokenizer.json}
     dim: 512
-  # 大模型：OpenAI 兼容端点。未配置 api-key 时，内容生成 / 题目识别会提示未启用，不影响其余功能
+  # 大模型：默认 OpenAI 兼容协议，另支持 ANTHROPIC / GEMINI / OLLAMA / VOLCENGINE。
+  # 本段是「启动兜底」——运行时 llm_config 表里有启用记录则以表为准（管理台可改，不用重启）。
+  # 换厂商最省事的做法：设 LLM_PRESET_CODE，或在管理台选预设自动填表。
   llm:
     enabled: ${LLM_ENABLED:true}
+    protocol: ${LLM_PROTOCOL:OPENAI}
+    # 鉴权：BEARER / HEADER(x-api-key) / QUERY_KEY / GOOG_HEADER / NONE(本地) / CUSTOM_HEADER
+    # 留空则跟随协议默认值
+    auth: ${LLM_AUTH:}
+    # base-url 不要带 chat-path；路径单独给
     base-url: ${LLM_BASE_URL:https://api.deepseek.com}
+    chat-path: ${LLM_CHAT_PATH:/v1/chat/completions}
     api-key: ${LLM_API_KEY:}
+    auth-header: ${LLM_AUTH_HEADER:}
     model: ${LLM_MODEL:deepseek-chat}
     timeout-seconds: ${LLM_TIMEOUT_SECONDS:90}
     max-tokens: ${LLM_MAX_TOKENS:2400}
     temperature: ${LLM_TEMPERATURE:0.3}
+    preset-code: ${LLM_PRESET_CODE:}
   exam:
     # 掌握度 EMA 学习率
     learning-rate: 0.3

@@ -289,8 +289,16 @@ export default function ContentManage() {
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
 
       {status && (
-        <Alert type="info" showIcon icon={<RobotOutlined />}
-          message={status.available ? 'AI 辅助生成已就绪，生成后请审核再发布。' : '当前使用基础模板生成，生成后请审核再发布。'} />
+        <Alert
+          type={status.available ? 'info' : 'warning'}
+          showIcon
+          icon={<RobotOutlined />}
+          message={
+            status.available
+              ? `AI 辅助生成已就绪${status.model ? `：${status.vendor || '自定义'} · ${status.model}（${status.protocolLabel}）` : ''}，生成后请审核再发布。`
+              : `${status.reason || '未配置大模型'}。当前用规则模板生成，功能不受影响，但内容会比较机械。`
+          }
+        />
       )}
 
       <Card size="small" title={<Space><FileTextOutlined />教学内容生成</Space>}

@@ -20,6 +20,7 @@ function emit() {
 export const ROLE = {
   ADMIN: 'ADMIN',
   ORG_ADMIN: 'ORG_ADMIN',
+  CAMPUS_ADMIN: 'CAMPUS_ADMIN',
   TEACHER: 'TEACHER',
   STUDENT: 'STUDENT'
 };
@@ -27,6 +28,7 @@ export const ROLE = {
 export const ROLE_LABEL = {
   ADMIN: '平台管理员',
   ORG_ADMIN: '机构管理员',
+  CAMPUS_ADMIN: '校区管理员',
   TEACHER: '教师',
   STUDENT: '学生'
 };
@@ -34,16 +36,22 @@ export const ROLE_LABEL = {
 export const ROLE_COLOR = {
   ADMIN: 'red',
   ORG_ADMIN: 'purple',
+  CAMPUS_ADMIN: 'cyan',
   TEACHER: 'blue',
   STUDENT: 'green'
 };
 
-/** 拥有教学资源管理权限的角色（教师 / 机构管理员 / 平台管理员） */
-export const STAFF_ROLES = [ROLE.ADMIN, ROLE.ORG_ADMIN, ROLE.TEACHER];
+/**
+ * 拥有教学资源管理权限的角色。
+ *
+ * <p>校区管理员能力等同教师，只是范围被限死在自己的校区，
+ * 所以一律归入 STAFF（前端只是体验优化，后端才是唯一边界）。</p>
+ */
+export const STAFF_ROLES = [ROLE.ADMIN, ROLE.ORG_ADMIN, ROLE.CAMPUS_ADMIN, ROLE.TEACHER];
 
 export const isStaff = (user) => STAFF_ROLES.includes(user?.role);
 
-/** 能管机构与账号的角色 */
+/** 能管机构与账号的角色。校区管理员管不了校区本身（校区归机构管理员分派） */
 export const ORG_ROLES = [ROLE.ADMIN, ROLE.ORG_ADMIN];
 
 export function readSession() {
@@ -84,5 +92,7 @@ export function homePathOf(user) {
   if (!user) return '/login';
   if (isStudent(user)) return '/my';
   if (user.role === ROLE.ORG_ADMIN) return '/org';
+  // 校区管理员的日常就是本校区的班级与学生，落地到机构管理页
+  if (user.role === ROLE.CAMPUS_ADMIN) return '/org';
   return '/graphs';
 }

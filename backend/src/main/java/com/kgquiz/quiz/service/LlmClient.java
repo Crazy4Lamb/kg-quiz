@@ -153,7 +153,7 @@ public class LlmClient {
             throw new BizException(unavailableReason());
         }
         long start = System.currentTimeMillis();
-        String url;
+        String url = "(未构造)";
         try {
             LlmRequest req = toRequest(s, systemPrompt, userPrompt, jsonMode);
             LlmProtocolCodec.Encoded enc = LlmProtocolCodec.encode(req);

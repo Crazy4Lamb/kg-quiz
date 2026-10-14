@@ -7,9 +7,11 @@ import com.kgquiz.quiz.auth.UserContext;
 import com.kgquiz.quiz.auth.UserRole;
 import com.kgquiz.quiz.common.BizException;
 import com.kgquiz.quiz.common.ForbiddenException;
+import com.kgquiz.quiz.dto.CampusAdminReq;
 import com.kgquiz.quiz.dto.CampusReq;
 import com.kgquiz.quiz.dto.ClazzReq;
 import com.kgquiz.quiz.dto.OrgReq;
+import com.kgquiz.quiz.dto.StudentImportReq;
 import com.kgquiz.quiz.dto.TeacherReq;
 import com.kgquiz.quiz.entity.Campus;
 import com.kgquiz.quiz.entity.Clazz;
@@ -211,10 +213,15 @@ public class OrgService {
 
     public List<Map<String, Object>> listCampuses(Long orgId) {
         Long scope = resolveReadOrg(orgId);
-        List<Campus> campuses = campusMapper.selectList(new LambdaQueryWrapper<Campus>()
-                .eq(Campus::getOrgId, scope).orderByAsc(Campus::getId));
+        LambdaQueryWrapper<Campus> wrapper = new LambdaQueryWrapper<Campus>()
+                .eq(Campus::getOrgId, scope).orderByAsc(Campus::getId);
+        // 校区管理员 / 教师只看自己那个校区；机构管理员以上不过滤
+        Long campusScope = UserContext.scopeCampusId();
+        if (campusScope != null) {
+            wrapper.eq(Campus::getId, campusScope);
+        }
         List<Map<String, Object>> result = new ArrayList<>();
-        for (Campus campus : campuses) {
+        for (Campus campus : campusMapper.selectList(wrapper)) {
             Map<String, Object> cv = campusView(campus);
             cv.put("clazzCount", clazzMapper.selectCount(
                     new LambdaQueryWrapper<Clazz>().eq(Clazz::getCampusId, campus.getId())));
@@ -276,6 +283,7 @@ public class OrgService {
             throw new BizException("校区不存在: " + id);
         }
         UserContext.checkOrgScope(campus.getOrgId());
+        UserContext.checkCampusScope(campus.getId());
         return campus;
     }
 
@@ -288,6 +296,23 @@ public class OrgService {
         view.put("address", campus.getAddress());
         view.put("status", campus.getStatus());
         view.put("createdAt", campus.getCreatedAt());
+        // 谁在管这个校区 —— 校区管理员是这一层的负责人，前端校区行直接显示
+        List<Map<String, Object>> admins = new ArrayList<>();
+        for (SysUser a : sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getCampusId, campus.getId())
+                .eq(SysUser::getRole, UserRole.CAMPUS_ADMIN.name())
+                .orderByAsc(SysUser::getId))) {
+            Map<String, Object> am = new LinkedHashMap<>();
+            am.put("userId", a.getId());
+            am.put("username", a.getUsername());
+            am.put("displayName", a.getDisplayName());
+            am.put("enabled", a.getEnabled());
+            admins.add(am);
+        }
+        view.put("admins", admins);
+        view.put("adminCount", admins.size());
+        // 没分配管理员是要紧的运维缺口，前端高亮提示用
+        view.put("adminAssigned", !admins.isEmpty());
         return view;
     }
 
@@ -303,6 +328,11 @@ public class OrgService {
         }
         if (campusId != null) {
             wrapper.eq(Clazz::getCampusId, campusId);
+        }
+        // 校区边界：校区管理员与教师只看到自己校区的班
+        Long campusScope = UserContext.scopeCampusId();
+        if (campusScope != null) {
+            wrapper.eq(Clazz::getCampusId, campusScope);
         }
         // 教师只看到自己带的班
         CurrentUser current = UserContext.require();
@@ -333,6 +363,7 @@ public class OrgService {
         clazz.setTextbook(nz(req.textbook()));
         clazz.setTerm(nz(req.term()));
         clazz.setHeadTeacherId(validateHeadTeacher(req.headTeacherId(), campus.getOrgId()));
+        clazz.setParentClazzId(resolveParentClazz(req.parentClazzId(), campus.getId(), null));
         clazz.setStatus("ACTIVE");
         clazzMapper.insert(clazz);
         return clazzView(clazz, 0);
@@ -349,10 +380,41 @@ public class OrgService {
         clazz.setTextbook(nz(req.textbook()));
         clazz.setTerm(nz(req.term()));
         clazz.setHeadTeacherId(validateHeadTeacher(req.headTeacherId(), campus.getOrgId()));
+        clazz.setParentClazzId(resolveParentClazz(req.parentClazzId(), campus.getId(), clazz.getId()));
         clazzMapper.updateById(clazz);
         long studentCount = studentMapper.selectCount(
                 new LambdaQueryWrapper<Student>().eq(Student::getClazzId, clazz.getId()));
         return clazzView(clazz, studentCount);
+    }
+
+    /**
+     * 校验上级班级：必须同校区，且只能一层。
+     *
+     * <p>三条硬规则：</p>
+     * <ul>
+     *   <li>父班必须存在且属于同一个校区（跨校区的层级没有意义）；</li>
+     *   <li>不能挂自己（自环）；</li>
+     *   <li>父班本身不能再有父班 —— 只支持一层，传两层直接拒绝。</li>
+     * </ul>
+     */
+    private Long resolveParentClazz(Long parentClazzId, Long campusId, Long selfId) {
+        if (parentClazzId == null) {
+            return null;
+        }
+        if (parentClazzId.equals(selfId)) {
+            throw new BizException("班级不能把自己设为上级");
+        }
+        Clazz parent = clazzMapper.selectById(parentClazzId);
+        if (parent == null) {
+            throw new BizException("上级班级不存在: " + parentClazzId);
+        }
+        if (!Objects.equals(parent.getCampusId(), campusId)) {
+            throw new BizException("上级班级必须属于同一校区");
+        }
+        if (parent.getParentClazzId() != null) {
+            throw new BizException("班级分层只支持一层，「" + parent.getName() + "」已经有上级班了");
+        }
+        return parentClazzId;
     }
 
     @Transactional
@@ -373,6 +435,7 @@ public class OrgService {
             throw new BizException("班级不存在: " + id);
         }
         UserContext.checkOrgScope(clazz.getOrgId());
+        UserContext.checkCampusScope(clazz.getCampusId());
         return clazz;
     }
 
@@ -406,6 +469,15 @@ public class OrgService {
             SysUser head = sysUserMapper.selectById(clazz.getHeadTeacherId());
             view.put("headTeacherName", head == null ? null : head.getDisplayName());
         }
+        // 班级分层：仅一层，level=0 顶级班 / 1 子班
+        view.put("parentClazzId", clazz.getParentClazzId());
+        if (clazz.getParentClazzId() != null) {
+            Clazz parent = clazzMapper.selectById(clazz.getParentClazzId());
+            view.put("parentClazzName", parent == null ? null : parent.getName());
+        }
+        view.put("level", clazz.getParentClazzId() == null ? 0 : 1);
+        view.put("childCount", clazzMapper.selectCount(
+                new LambdaQueryWrapper<Clazz>().eq(Clazz::getParentClazzId, clazz.getId())));
         view.put("status", clazz.getStatus());
         view.put("createdAt", clazz.getCreatedAt());
         view.put("studentCount", studentCount);
@@ -431,6 +503,11 @@ public class OrgService {
         if (campusId != null) {
             wrapper.eq(SysUser::getCampusId, campusId);
         }
+        // 校区管理员只看本校区教师
+        Long campusScope = UserContext.scopeCampusId();
+        if (campusScope != null) {
+            wrapper.eq(SysUser::getCampusId, campusScope);
+        }
         if (keyword != null && !keyword.isBlank()) {
             String kw = keyword.trim();
             wrapper.and(w -> w.like(SysUser::getDisplayName, kw).or().like(SysUser::getUsername, kw));
@@ -444,13 +521,19 @@ public class OrgService {
 
     @Transactional
     public Map<String, Object> createTeacher(TeacherReq req) {
-        Long orgId = UserContext.resolveWriteOrgId(null);
         String username = req.username() == null ? "" : req.username().trim();
         if (username.isEmpty()) {
             throw new BizException("请填写教师登录名");
         }
         if (req.password() == null || req.password().isBlank()) {
             throw new BizException("请填写教师初始密码");
+        }
+        // 机构从校区反推（教师必须归属一个校区）；没给校区才退回账号自己的机构
+        Long orgId;
+        if (req.campusId() != null) {
+            orgId = requireCampus(req.campusId()).getOrgId();
+        } else {
+            orgId = UserContext.resolveWriteOrgId(null);
         }
         Long campusId = resolveCampus(req.campusId(), orgId);
 
@@ -556,6 +639,7 @@ public class OrgService {
             throw new BizException("教师不存在: " + userId);
         }
         UserContext.checkOrgScope(teacher.getOrgId());
+        UserContext.checkCampusScope(teacher.getCampusId());
         return teacher;
     }
 
@@ -591,6 +675,206 @@ public class OrgService {
         return view;
     }
 
+    // ==================== 校区管理员 ====================
+
+    /**
+     * 校区管理员列表。
+     *
+     * <p>一个校区可以有多个管理员（正副职、分管不同板块），所以这里是列表而非单值。
+     * 不传 {@code campusId} 则返回调用者可见范围内的全部校区管理员。</p>
+     */
+    public List<Map<String, Object>> listCampusAdmins(Long orgId, Long campusId, String keyword) {
+        Long scope = resolveReadOrg(orgId);
+        LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getRole, UserRole.CAMPUS_ADMIN.name())
+                .orderByAsc(SysUser::getId);
+        wrapper.eq(scope != null, SysUser::getOrgId, scope);
+        if (campusId != null) {
+            UserContext.checkCampusScope(campusId);
+            wrapper.eq(SysUser::getCampusId, campusId);
+        }
+        Long campusScope = UserContext.scopeCampusId();
+        if (campusScope != null) {
+            wrapper.eq(SysUser::getCampusId, campusScope);
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String kw = keyword.trim();
+            wrapper.and(w -> w.like(SysUser::getDisplayName, kw).or().like(SysUser::getUsername, kw));
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (SysUser admin : sysUserMapper.selectList(wrapper)) {
+            result.add(campusAdminView(admin));
+        }
+        return result;
+    }
+
+    /**
+     * 新建校区管理员。
+     *
+     * <p>{@code campusId} 必填且必须是调用者能操作的校区 —— 这是这个角色的全部意义，
+     * 没绑定校区的管理员会被所有校区级判定拦下，不如在创建时就拒掉。</p>
+     */
+    @Transactional
+    public Map<String, Object> createCampusAdmin(CampusAdminReq req) {
+        // 先定校区：它同时决定账号归属的机构与权限边界
+        if (req.campusId() == null) {
+            throw new BizException("校区管理员必须绑定校区");
+        }
+        // requireCampus 已经校验过机构归属与校区边界；机构直接反推，
+        // 不让调用方重复传一遍 —— 两个字段可能填错同一个请求体，传了矛盾的值反而更难排查
+        Campus campus = requireCampus(req.campusId());
+        Long orgId = campus.getOrgId();
+
+        String username = req.username() == null ? "" : req.username().trim();
+        if (username.isEmpty()) {
+            throw new BizException("请填写管理员登录名");
+        }
+        if (req.password() == null || req.password().isBlank()) {
+            throw new BizException("请填写管理员初始密码");
+        }
+
+        Long dup = sysUserMapper.selectCount(
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username));
+        if (dup != null && dup > 0) {
+            throw new BizException("登录名已存在: " + username);
+        }
+
+        SysUser user = new SysUser();
+        user.setUsername(username);
+        user.setPassword(PasswordEncoder.encode(req.password()));
+        user.setRole(UserRole.CAMPUS_ADMIN.name());
+        user.setDisplayName(req.displayName().trim());
+        user.setOrgId(orgId);
+        user.setCampusId(campus.getId());
+        user.setEnabled(1);
+        sysUserMapper.insert(user);
+        return campusAdminView(user);
+    }
+
+    /** 编辑校区管理员：改姓名 / 改绑校区。登录名只读。 */
+    @Transactional
+    public Map<String, Object> updateCampusAdmin(Long userId, CampusAdminReq req) {
+        SysUser admin = requireCampusAdmin(userId);
+        admin.setDisplayName(req.displayName().trim());
+        if (req.campusId() != null) {
+            Campus campus = requireCampus(req.campusId());
+            admin.setCampusId(campus.getId());
+        }
+        sysUserMapper.updateById(admin);
+        return campusAdminView(admin);
+    }
+
+    /** 启停校区管理员。停用即踢下线。 */
+    @Transactional
+    public Map<String, Object> setCampusAdminEnabled(Long userId, boolean enabled) {
+        SysUser admin = requireCampusAdmin(userId);
+        admin.setEnabled(enabled ? 1 : 0);
+        sysUserMapper.updateById(admin);
+        if (!enabled) {
+            sysTokenMapper.delete(new LambdaQueryWrapper<com.kgquiz.quiz.entity.SysToken>()
+                    .eq(com.kgquiz.quiz.entity.SysToken::getUserId, userId));
+        }
+        return campusAdminView(admin);
+    }
+
+    @Transactional
+    public Map<String, Object> resetCampusAdminPassword(Long userId, String password) {
+        SysUser admin = requireCampusAdmin(userId);
+        String pwd = (password == null || password.isBlank()) ? "campus123" : password;
+        authService.resetPassword(admin.getId(), pwd);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("userId", userId);
+        result.put("username", admin.getUsername());
+        result.put("password", pwd);
+        return result;
+    }
+
+    @Transactional
+    public void deleteCampusAdmin(Long userId) {
+        SysUser admin = requireCampusAdmin(userId);
+        sysTokenMapper.delete(new LambdaQueryWrapper<com.kgquiz.quiz.entity.SysToken>()
+                .eq(com.kgquiz.quiz.entity.SysToken::getUserId, userId));
+        sysUserMapper.deleteById(admin.getId());
+    }
+
+    /**
+     * 校区内可用的管理员候选（已绑本校区、未被停用、且不是教师/学生账号）。
+     *
+     * <p>用于「把已有账号提成管理员」时提供下拉 —— 比每次都让用户新建账号更贴近真实做法。</p>
+     */
+    public List<Map<String, Object>> adminCandidates(Long campusId) {
+        Campus campus = requireCampus(campusId);
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (SysUser u : sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getOrgId, campus.getOrgId())
+                .eq(SysUser::getCampusId, campusId)
+                .eq(SysUser::getEnabled, 1)
+                .orderByAsc(SysUser::getId))) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("userId", u.getId());
+            m.put("username", u.getUsername());
+            m.put("displayName", u.getDisplayName());
+            m.put("role", u.getRole());
+            m.put("roleLabel", UserRole.of(u.getRole()).label());
+            m.put("campusId", u.getCampusId());
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** 提升已有账号为校区管理员：改角色并绑定校区 */
+    @Transactional
+    public Map<String, Object> promoteCampusAdmin(Long userId, Long campusId) {
+        SysUser user = sysUserMapper.selectById(userId);
+        if (user == null) {
+            throw new BizException("账号不存在: " + userId);
+        }
+        UserContext.checkOrgScope(user.getOrgId());
+        Campus campus = requireCampus(campusId);
+        // 教师提成管理员要一并清掉带班，否则他仍会以教师身份看到本班数据
+        if (UserRole.TEACHER.name().equals(user.getRole())) {
+            teacherClazzMapper.delete(new LambdaQueryWrapper<TeacherClazz>()
+                    .eq(TeacherClazz::getTeacherId, userId));
+        }
+        user.setRole(UserRole.CAMPUS_ADMIN.name());
+        user.setCampusId(campus.getId());
+        user.setOrgId(campus.getOrgId());
+        sysUserMapper.updateById(user);
+        return campusAdminView(user);
+    }
+
+    private SysUser requireCampusAdmin(Long userId) {
+        SysUser admin = sysUserMapper.selectById(userId);
+        if (admin == null || !UserRole.CAMPUS_ADMIN.name().equals(admin.getRole())) {
+            throw new BizException("校区管理员不存在: " + userId);
+        }
+        UserContext.checkOrgScope(admin.getOrgId());
+        UserContext.checkCampusScope(admin.getCampusId());
+        return admin;
+    }
+
+    private Map<String, Object> campusAdminView(SysUser admin) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("userId", admin.getId());
+        view.put("username", admin.getUsername());
+        view.put("displayName", admin.getDisplayName());
+        view.put("role", admin.getRole());
+        view.put("roleLabel", UserRole.CAMPUS_ADMIN.label());
+        view.put("enabled", admin.getEnabled());
+        view.put("orgId", admin.getOrgId());
+        view.put("campusId", admin.getCampusId());
+        view.put("createdAt", admin.getCreatedAt());
+        view.put("lastLoginAt", admin.getLastLoginAt());
+        if (admin.getCampusId() != null) {
+            Campus campus = campusMapper.selectById(admin.getCampusId());
+            view.put("campusName", campus == null ? null : campus.getName());
+        }
+        // 管理员管着这个校区多少班，直接摆出来便于判断分工
+        view.put("managedClazzCount", clazzMapper.selectCount(
+                new LambdaQueryWrapper<Clazz>().eq(Clazz::getCampusId, admin.getCampusId())));
+        return view;
+    }
+
     // ==================== 学生（组织视角） ====================
 
     /** 机构下的学生名册，可按校区 / 班级 / 关键字筛选 */
@@ -605,6 +889,11 @@ public class OrgService {
         }
         if (clazzId != null) {
             wrapper.eq(Student::getClazzId, clazzId);
+        }
+        // 校区边界：校区管理员只看本校区学生（教师随后再按带班收窄）
+        Long campusScope = UserContext.scopeCampusId();
+        if (campusScope != null) {
+            wrapper.eq(Student::getCampusId, campusScope);
         }
         if (keyword != null && !keyword.isBlank()) {
             wrapper.like(Student::getName, keyword.trim());
@@ -639,6 +928,118 @@ public class OrgService {
         return result;
     }
 
+    // ==================== 班级下钻 ====================
+
+    /**
+     * 班级详情：一次拿齐「这个班是谁、谁在教、有多少学生」。
+     *
+     * <p>前端班级下钻面板就靠这个接口渲染。它刻意把班主任、任课教师、学生名单都带上，
+     * 避免前端为了拼一个面板连发四五个请求 —— 班级是教务最常点的层级，
+     * 多几次往返比多写一点服务端组装更影响体验。</p>
+     */
+    public Map<String, Object> clazzDetail(Long clazzId) {
+        Clazz clazz = requireClazz(clazzId);
+        long studentCount = studentMapper.selectCount(
+                new LambdaQueryWrapper<Student>().eq(Student::getClazzId, clazzId));
+        Map<String, Object> detail = clazzView(clazz, studentCount);
+
+        // 任课教师（teacher_clazz 里 subject 非空的）；班主任单独从 clazz.head_teacher_id 取
+        List<Map<String, Object>> teachers = new ArrayList<>();
+        for (TeacherClazz tc : teacherClazzMapper.selectList(new LambdaQueryWrapper<TeacherClazz>()
+                .eq(TeacherClazz::getClazzId, clazzId).orderByAsc(TeacherClazz::getId))) {
+            SysUser t = sysUserMapper.selectById(tc.getTeacherId());
+            if (t == null) {
+                continue;
+            }
+            Map<String, Object> tm = new LinkedHashMap<>();
+            tm.put("userId", t.getId());
+            tm.put("displayName", t.getDisplayName());
+            tm.put("username", t.getUsername());
+            tm.put("subject", tc.getSubject());
+            tm.put("isHeadTeacher", t.getId().equals(clazz.getHeadTeacherId()));
+            teachers.add(tm);
+        }
+        detail.put("teachers", teachers);
+
+        // 子班（分层）
+        List<Map<String, Object>> children = new ArrayList<>();
+        for (Clazz child : clazzMapper.selectList(new LambdaQueryWrapper<Clazz>()
+                .eq(Clazz::getParentClazzId, clazzId).orderByAsc(Clazz::getId))) {
+            children.add(clazzView(child, studentMapper.selectCount(
+                    new LambdaQueryWrapper<Student>().eq(Student::getClazzId, child.getId()))));
+        }
+        detail.put("children", children);
+
+        // 本班学生名单（教师只带本班所以无越权问题）
+        List<Map<String, Object>> students = new ArrayList<>();
+        for (Student s : studentMapper.selectList(new LambdaQueryWrapper<Student>()
+                .eq(Student::getClazzId, clazzId).orderByAsc(Student::getId))) {
+            Map<String, Object> sm = new LinkedHashMap<>();
+            sm.put("id", s.getId());
+            sm.put("name", s.getName());
+            SysUser acc = authService.findByStudentId(s.getId());
+            sm.put("username", acc == null ? null : acc.getUsername());
+            sm.put("accountEnabled", acc == null ? null : acc.getEnabled());
+            students.add(sm);
+        }
+        detail.put("students", students);
+        return detail;
+    }
+
+    /**
+     * 学生批量导入到班级。
+     *
+     * <p>每个姓名建一份学生档案 + 一个 {@code stu{id}} 账号（默认密码 123456），并归入本班。
+     * 同班同名视为已存在、记入 {@code duplicated} 而非报错 —— 教务场景一次粘几十行，
+     * 撞一个重复不该让整批失败。</p>
+     *
+     * <p>整个方法一个事务：要么整批成功，要么整批回滚。半批成功的名册没人能收拾。</p>
+     */
+    @Transactional
+    public Map<String, Object> importStudents(Long clazzId, StudentImportReq req) {
+        Clazz clazz = requireClazz(clazzId);
+        List<String> names = req.resolvedNames();
+        if (names.isEmpty()) {
+            throw new BizException("请提供至少一个学生姓名");
+        }
+
+        List<String> created = new ArrayList<>();
+        List<String> duplicated = new ArrayList<>();
+        for (String name : names) {
+            Long exists = studentMapper.selectCount(new LambdaQueryWrapper<Student>()
+                    .eq(Student::getClazzId, clazzId).eq(Student::getName, name));
+            if (exists != null && exists > 0) {
+                duplicated.add(name);
+                continue;
+            }
+            Student student = new Student();
+            student.setName(name);
+            student.setOrgId(clazz.getOrgId());
+            student.setCampusId(clazz.getCampusId());
+            student.setClazzId(clazz.getId());
+            studentMapper.insert(student);
+            // 档案建好才拿得到 id，账号名依赖它
+            authService.createStudentAccount(
+                    authService.suggestUsername(student.getId()),
+                    AuthService.DEFAULT_STUDENT_PWD,
+                    name,
+                    student.getId(),
+                    clazz.getOrgId(),
+                    clazz.getCampusId());
+            created.add(name);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("clazzId", clazzId);
+        result.put("clazzName", clazz.getName());
+        result.put("createdCount", created.size());
+        result.put("duplicatedCount", duplicated.size());
+        result.put("created", created);
+        result.put("duplicated", duplicated);
+        result.put("defaultPassword", AuthService.DEFAULT_STUDENT_PWD);
+        return result;
+    }
+
     /** 学生转班 / 转校区 */
     @Transactional
     public Map<String, Object> moveStudent(Long studentId, Long clazzId) {
@@ -647,6 +1048,7 @@ public class OrgService {
             throw new BizException("学生不存在: " + studentId);
         }
         UserContext.checkOrgScope(student.getOrgId());
+        UserContext.checkCampusScope(student.getCampusId());
         Clazz clazz = requireClazz(clazzId);
         student.setClazzId(clazz.getId());
         student.setCampusId(clazz.getCampusId());

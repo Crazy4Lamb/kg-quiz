@@ -1,0 +1,82 @@
+=== 1. 登录 ===
+  PASS  管理员登录
+  PASS  教师登录
+  PASS  学生登录
+
+=== 2. 预设目录 ===
+  PASS  教师可读 overview
+  PASS  预设数量 >= 10
+  PASS  预设含 deepseek
+  PASS  预设含 qwen
+  PASS  预设含 anthropic
+  PASS  预设含 gemini
+  PASS  预设含 ollama-local
+  PASS  预设含 custom
+
+=== 3. 协议覆盖 ===
+  PASS  支持协议 OPENAI
+  PASS  支持协议 ANTHROPIC
+  PASS  支持协议 GEMINI
+  PASS  支持协议 OLLAMA
+  PASS  支持协议 VOLCENGINE
+
+=== 4. 预设的协议/鉴权/端点自洽 ===
+  PASS  anthropic 鉴权为 x-api-key
+  PASS  anthropic 端点为 /v1/messages
+  PASS  anthropic 无原生 JSON 模式
+  PASS  gemini 路径含 {model} 占位
+  PASS  gemini 支持 JSON 模式
+  PASS  ollama 无需鉴权
+  PASS  ollama 标为零成本
+  PASS  qwen base-url 带 compatible-mode
+  PASS  deepseek base-url 不含 /v1/chat
+
+=== 5. 配置校验：把常见配错挡在落库前 ===
+  PASS  base-url 误含端点路径被拒
+  PASS  base-url 缺协议头被拒
+  PASS  gemini 缺 {model} 占位被拒
+  PASS  空模型名被拒
+
+=== 6. 保存 + 生效（不重启）===
+  PASS  保存 ollama 配置
+  PASS  响应不回显真实 Key 字段
+  PASS  状态显示已切到 OLLAMA 协议
+  PASS  状态显示模型 qwen2.5:7b
+  PASS  无鉴权协议即使没 Key 也算可用
+  PASS  状态含厂商名
+
+=== 7. 试连通：错误分类 ===
+  PASS  本地未起 ollama 应判为网络问题
+  PASS  失败时给出排查建议
+  PASS  缺 Key 判为配置不完整
+  PASS  QUERY_KEY 模式下 URL 里的 key 被打码
+  PASS  端点回显保留 {model} 占位
+  PASS  假 Key 应判为认证失败
+  PASS  认证失败时提示不泄漏 Key 原文
+
+=== 8. 权限边界 ===
+  PASS  学生读 overview 403
+  PASS  教师写配置 403（写限 ADMIN）
+  PASS  学生试连通 403
+
+=== 9. 恢复默认（回落环境变量）===
+  PASS  停用配置
+  PASS  停用后回落环境变量协议
+  PASS  停用后回落后 available=False（无 Key）
+  PASS  停用后给出明确原因
+  PASS  重新启用
+
+=== 10. 原降级路径未被破坏（无 Key 时内容生成仍走模板）===
+  PASS  切回 deepseek 且不带 Key
+  PASS  无 Key 时内容状态 available=False
+  PASS  无 Key 时给出原因
+  PASS  内容类型含讲解与教案
+
+=== 11. 语义检索仍正常（Qdrant 自愈后）===
+  PASS  语义检索可用
+  PASS  召回到候选（向量非空）
+  PASS  候选带语义来源
+
+============================================================
+PASS=57 FAIL=0
+全部通过 ✅

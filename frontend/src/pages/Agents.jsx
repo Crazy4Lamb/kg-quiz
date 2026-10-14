@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Card, Table, Button, Space, Tag, Typography, message, Modal, Form, Input, Select,
-  Switch, Popconfirm, Alert, Row, Col, List, Empty, Tooltip, Tabs, Checkbox, Statistic, Spin
+  Switch, Popconfirm, Alert, Row, Col, List, Empty, Tooltip, Tabs, Checkbox, Statistic, Spin, Cascader
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, ExperimentOutlined,
-  ApiOutlined, RobotOutlined, SafetyCertificateOutlined, LinkOutlined
+  ApiOutlined, RobotOutlined, SafetyCertificateOutlined, LinkOutlined, BankOutlined,
+  ClusterOutlined, TeamOutlined
 } from '@ant-design/icons';
 import { api, unwrap } from '../api.js';
+import { readSession, ROLE } from '../auth.js';
 
 const ROLE_LABEL = { STUDENT: '学生', TEACHER: '教师', ORG_ADMIN: '机构管理员', ADMIN: '平台管理员' };
 const STATUS_META = {
@@ -18,6 +20,14 @@ const STATUS_META = {
 
 /** 工具按分类分组的展示顺序 */
 const CATEGORY_ORDER = ['诊断', '学习', '检索', '教研', '图谱'];
+
+/** 生效范围四档：平台 / 机构 / 校区 / 班级 */
+const SCOPE_META = {
+  PLATFORM: { color: 'blue', label: '全平台' },
+  ORG: { color: 'purple', label: '本机构' },
+  CAMPUS: { color: 'cyan', label: '校区级' },
+  CLAZZ: { color: 'gold', label: '班级级' }
+};
 
 /**
  * Agent 配置域管理台。
@@ -31,10 +41,24 @@ const CATEGORY_ORDER = ['诊断', '学习', '检索', '教研', '图谱'];
  *
  * <p>最后一条是关键：配置只能决定「看不看得到这个按钮」，
  * 决定不了「能不能拿到这份数据」。</p>
+ *
+ * <p><b>生效范围</b>（平台 / 机构 / 校区 / 班级）是编排层的第四维，
+ * 表达「这个 Agent 在哪些组织单元启用」——它同样不放开任何数据访问。
+ * 两个总览 Tab 用来回答「哪个校区、哪个班还没配」。</p>
  */
 export default function Agents() {
+  const { user } = readSession() || {};
+  const isPlatformAdmin = user?.role === ROLE.ADMIN;
+
   const [agents, setAgents] = useState([]);
   const [tools, setTools] = useState([]);
+  const [scopes, setScopes] = useState(null);
+  const [campuses, setCampuses] = useState([]);
+  const [clazzes, setClazzes] = useState([]);
+  const [orgs, setOrgs] = useState([]);
+  const [orgId, setOrgId] = useState(null);
+  const [campusId, setCampusId] = useState(null);
+  const [clazzId, setClazzId] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const [open, setOpen] = useState(false);
@@ -51,15 +75,46 @@ export default function Agents() {
   const [dryResult, setDryResult] = useState(null);
   const [dryBusy, setDryBusy] = useState(false);
 
+  /** 生效范围下拉的级联选项：机构 → 校区 → 班级 */
+  const scopeOptions = useMemo(() => {
+    const campusNodes = campuses.map((c) => {
+      const kids = clazzes
+        .filter((k) => k.campusId === c.id)
+        .map((k) => ({ value: k.id, label: k.name }));
+      // children 传空数组时 antd 会把它当叶子节点处理，hover 不展开二级菜单。
+      // 校区下面暂时没有班级也得能选（那就只到校区级），所以给个空的占位层。
+      return {
+        value: c.id,
+        label: c.name,
+        // 带 orgId 是为了让平台管理员能把校区挂回正确的机构节点下
+        orgId: c.orgId,
+        children: kids.length ? kids : [{ value: `__empty_${c.id}`, label: '（暂无班级）', disabled: true }]
+      };
+    });
+    // 机构管理员锁在自己机构，树顶只留一个机构节点
+    if (!isPlatformAdmin) {
+      const self = orgs[0];
+      return self ? [{ value: self.id, label: self.name, children: campusNodes }] : [];
+    }
+    // 平台管理员按机构建树：校区必须挂在自己机构下面，不能串
+    return orgs.map((o) => ({
+      value: o.id,
+      label: o.name,
+      children: campusNodes.filter((c) => c.orgId === o.id)
+    }));
+  }, [campuses, clazzes, orgs, isPlatformAdmin]);
+
   const load = async () => {
     setLoading(true);
     try {
-      const [a, t] = await Promise.all([
-        api.listAgents(),
-        api.agentTools()
+      const [a, t, sc] = await Promise.all([
+        api.listAgents({ orgId, campusId, clazzId }),
+        api.agentTools(),
+        api.agentScopes().catch(() => null)
       ]);
       setAgents(unwrap(a) || []);
       setTools(unwrap(t) || []);
+      setScopes(sc ? unwrap(sc) : null);
     } catch (e) {
       message.error(e.message);
     } finally {
@@ -67,7 +122,45 @@ export default function Agents() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [orgId, campusId, clazzId]);
+
+  /**
+   * 组织树一次加载完：机构 + 校区 + 班级。
+   *
+   * <p>刻意合成一个 effect —— 拆成「先取机构再取校区」会产生竞态：
+   * 级联的 options 由 campuses 推导，而 Cascader 在 options 变化时不会重建已展开的菜单，
+   * 结果就是「机构层有、校区层空」这种看着像没数据的半成品状态。</p>
+   *
+   * <p>平台管理员不选机构时（orgId 为 null）把所有机构的校区班级都拉下来；
+   * 一旦选了机构就只拉那一个，避免筛选下拉里混进别的机构的班级。</p>
+   */
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const o = unwrap(await api.listOrgs()) || [];
+      if (!alive) return;
+      setOrgs(o);
+      if (!isPlatformAdmin) {
+        setOrgId((prev) => (prev ?? o[0]?.id ?? null));
+      }
+      const targets = orgId ? [orgId] : o.map((x) => x.id);
+      if (!targets.length) {
+        setCampuses([]);
+        setClazzes([]);
+        return;
+      }
+      const pairs = await Promise.all(targets.map(async (id) => ({
+        c: unwrap(await api.listCampuses(id)) || [],
+        k: unwrap(await api.listClazzes({ orgId: id })) || []
+      })));
+      if (!alive) return;
+      setCampuses(pairs.flatMap((p) => p.c));
+      setClazzes(pairs.flatMap((p) => p.k));
+    })().catch(() => {
+      // 组织数据缺失不该挡住 Agent 编排本身
+    });
+    return () => { alive = false; };
+  }, [orgId, isPlatformAdmin]);
 
   useEffect(() => {
     api.listStudents().then((r) => {
@@ -92,9 +185,14 @@ export default function Agents() {
   const openEditor = (agent) => {
     form.resetFields();
     if (agent) {
+      // 后端已保证「有 clazzId 必有 campusId」，这里直接还原级联路径
+      const path = agent.clazzId
+        ? [agent.orgId, agent.campusId, agent.clazzId]
+        : (agent.campusId ? [agent.orgId, agent.campusId] : (agent.orgId ? [agent.orgId] : []));
       form.setFieldsValue({
         id: agent.id,
         code: agent.code,
+        scopePath: path,
         name: agent.name,
         description: agent.description,
         targetRole: agent.targetRole,
@@ -105,6 +203,7 @@ export default function Agents() {
       });
     } else {
       form.setFieldsValue({
+        scopePath: isPlatformAdmin ? [] : (orgId ? [orgId] : []),
         targetRole: 'STUDENT', temperature: 0.3, maxTokens: 2048, enabled: true
       });
     }
@@ -113,12 +212,21 @@ export default function Agents() {
 
   const save = async () => {
     const v = await form.validateFields();
+    const path = v.scopePath || [];
+    const last = path[path.length - 1];
+    // 级联末级有两种含义：校区或班级。后端会再校验一遍归属，这里只是把语义拆开。
+    // __empty_ 前缀是「该校区暂无班级」的占位节点，不能当 clazzId 提交。
+    const isClazz = last != null && !String(last).startsWith('__empty_')
+      && clazzes.some((k) => k.id === last);
     setBusy(true);
     try {
       await api.saveAgent({
         id: v.id ?? null,
         code: v.code,
-        orgId: null,
+        // 平台级 = 不选任何机构；选中机构但不选下级 = 本机构全部校区
+        orgId: path.length ? path[0] : null,
+        campusId: path.length >= 2 ? path[1] : null,
+        clazzId: isClazz ? last : null,
         name: v.name,
         description: v.description || '',
         targetRole: v.targetRole,
@@ -219,7 +327,26 @@ export default function Agents() {
       )
     },
     {
-      title: '面向角色', dataIndex: 'targetRole', width: 110,
+      title: '生效范围', dataIndex: 'scopeLabel', width: 190,
+      render: (_, r) => {
+        const meta = SCOPE_META[r.scopeLevel] || SCOPE_META.PLATFORM;
+        return (
+          <Tooltip title={r.scopeLevel === 'CLAZZ'
+            ? '只有该班级的师生会看到这个 Agent；同校区其他班不受影响'
+            : (r.scopeLevel === 'CAMPUS'
+              ? '该校区下所有班级的师生都会看到这个 Agent'
+              : '覆盖范围内的全部人员都会看到')}>
+            <Space size={4}>
+              <Tag color={meta.color}>{meta.label}</Tag>
+              {r.campusName && <Typography.Text style={{ fontSize: 12 }}>{r.campusName}</Typography.Text>}
+              {r.clazzName && <Tag>{r.clazzName}</Tag>}
+            </Space>
+          </Tooltip>
+        );
+      }
+    },
+    {
+      title: '面向角色', dataIndex: 'targetRole', width: 100,
       render: (v) => <Tag>{ROLE_LABEL[v] || v}</Tag>
     },
     {
@@ -257,6 +384,89 @@ export default function Agents() {
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
+      )
+    }
+  ];
+
+  // ==================== 生效范围总览 ====================
+
+  const campusColumns = [
+    { title: '校区', dataIndex: 'name', width: 160 },
+    { title: '班级数', dataIndex: 'clazzCount', width: 80 },
+    {
+      title: '单独配置', dataIndex: 'directCount', width: 100,
+      render: (v) => (v > 0
+        ? <Tag color="cyan">{v} 个校区级</Tag>
+        : <Typography.Text type="secondary" style={{ fontSize: 12 }}>未单独配置</Typography.Text>)
+    },
+    {
+      title: '实际生效', dataIndex: 'effectiveCount', width: 150,
+      render: (_, r) => (
+        <Space size={4} wrap>
+          <Tag color="blue">{r.effectiveCount} 个</Tag>
+          {r.effectiveCount === 0 && <Tag color="orange">该校区没有任何可用 Agent</Tag>}
+        </Space>
+      )
+    },
+    {
+      title: '校区级 Agent', dataIndex: 'directAgents', render: (v) => (
+        v.length
+          ? v.map((a) => (
+            <Tag key={a.id} color={a.enabled === 1 ? 'cyan' : 'default'}>
+              {a.name}{a.enabled !== 1 ? '（停用）' : ''}
+            </Tag>
+          ))
+          : <Typography.Text type="secondary" style={{ fontSize: 12 }}>—</Typography.Text>
+      )
+    },
+    {
+      title: '', width: 90, render: (_, r) => (
+        <Button type="link" size="small" onClick={() => { setCampusId(r.id); setClazzId(null); }}>
+          查看
+        </Button>
+      )
+    }
+  ];
+
+  const clazzColumns = [
+    { title: '班级', dataIndex: 'name', width: 160 },
+    { title: '年级', dataIndex: 'grade', width: 90, render: (v) => v || '—' },
+    { title: '科目', dataIndex: 'subject', width: 80, render: (v) => v || '—' },
+    {
+      title: '所属校区', dataIndex: 'campusId', width: 130,
+      render: (v) => campuses.find((c) => c.id === v)?.name || '—'
+    },
+    {
+      title: '单独配置', dataIndex: 'directCount', width: 100,
+      render: (v) => (v > 0
+        ? <Tag color="gold">{v} 个班级级</Tag>
+        : <Typography.Text type="secondary" style={{ fontSize: 12 }}>未单独配置</Typography.Text>)
+    },
+    {
+      title: '实际生效', dataIndex: 'effectiveCount', width: 150,
+      render: (_, r) => (
+        <Space size={4} wrap>
+          <Tag color="blue">{r.effectiveCount} 个</Tag>
+          {r.effectiveCount === 0 && <Tag color="orange">该班级没有任何可用 Agent</Tag>}
+        </Space>
+      )
+    },
+    {
+      title: '班级级 Agent', dataIndex: 'directAgents', render: (v) => (
+        v.length
+          ? v.map((a) => (
+            <Tag key={a.id} color={a.enabled === 1 ? 'gold' : 'default'}>
+              {a.name}{a.enabled !== 1 ? '（停用）' : ''}
+            </Tag>
+          ))
+          : <Typography.Text type="secondary" style={{ fontSize: 12 }}>—</Typography.Text>
+      )
+    },
+    {
+      title: '', width: 90, render: (_, r) => (
+        <Button type="link" size="small" onClick={() => { setClazzId(r.id); setCampusId(null); }}>
+          查看
+        </Button>
       )
     }
   ];
@@ -313,7 +523,11 @@ export default function Agents() {
           <div style={{ fontSize: 13, lineHeight: 1.7 }}>
             <div><Tag color="default">工具层</Tag>定义在 <code>AgentToolCatalog</code>，编译期固定，管理台<b>只读</b>。
               因为工具是带副作用的代码，能不能调取决于实现与后端鉴权，不取决于表里有没有一行。</div>
-            <div><Tag color="orange">编排层</Tag>本页可配：谁、什么提示词、跑哪个模型、挂哪些工具。</div>
+            <div><Tag color="orange">编排层</Tag>本页可配：谁、什么提示词、跑哪个模型、挂哪些工具、
+              在<b>哪些校区 / 班级</b>生效。</div>
+            <div><Tag color="cyan">生效范围</Tag>平台 / 机构 / 校区 / 班级四档。
+              它只决定「这个 Agent 在哪儿启用」——同样是编排层，<b>不放开任何数据访问</b>。
+              越界的校区、班级 id 会被后端直接 403。</div>
             <div><Tag color="red">权限层</Tag>本页<b>刻意不提供任何入口</b>。
               Agent 能访问哪些数据，永远由后端按调用者身份实时算——
               配置只能决定「看不看得到这个按钮」，决定不了「能不能拿到这份数据」。</div>
@@ -340,14 +554,82 @@ export default function Agents() {
             key: 'agents', label: 'Agent 编排',
             children: (
               <>
-                <Space style={{ marginBottom: 12 }}>
+                <Space style={{ marginBottom: 12 }} wrap>
                   <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor(null)}>
                     新建 Agent
                   </Button>
                   <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
+                  <span style={{ width: 12 }} />
+                  {isPlatformAdmin && (
+                    <Select allowClear placeholder="按机构筛选" style={{ minWidth: 180 }}
+                      value={orgId ?? undefined}
+                      options={orgs.map((o) => ({ value: o.id, label: o.name }))}
+                      onChange={(v) => { setOrgId(v ?? null); setCampusId(null); setClazzId(null); }}
+                    />
+                  )}
+                  <Select allowClear placeholder="按校区筛选" style={{ minWidth: 170 }}
+                    value={campusId ?? undefined}
+                    options={campuses.map((c) => ({ value: c.id, label: c.name }))}
+                    onChange={(v) => { setCampusId(v ?? null); setClazzId(null); }}
+                  />
+                  <Select allowClear placeholder="按班级筛选" style={{ minWidth: 170 }}
+                    value={clazzId ?? undefined}
+                    options={clazzes.map((k) => ({
+                      value: k.id,
+                      label: `${campuses.find((c) => c.id === k.campusId)?.name || ''} ${k.name}`.trim()
+                    }))}
+                    onChange={(v) => { setClazzId(v ?? null); if (v) setCampusId(null); }}
+                  />
+                  {(orgId || campusId || clazzId) && (
+                    <Button type="link" size="small"
+                      onClick={() => { setCampusId(null); setClazzId(null); setOrgId(isPlatformAdmin ? null : orgId); }}>
+                      清除筛选
+                    </Button>
+                  )}
                 </Space>
+                {(campusId || clazzId) && (
+                  <Alert type="info" showIcon style={{ marginBottom: 12 }}
+                    message="当前按生效范围下钻"
+                    description="列出的是「在这个校区 / 班级里实际生效」的全部 Agent —— 包括从机构级、平台级继承下来的，不只是精确挂在该单元上的。" />
+                )}
                 <Table rowKey="id" size="small" loading={loading} dataSource={agents}
-                  columns={agentColumns} pagination={false} />
+                  columns={agentColumns} pagination={false} scroll={{ x: 1100 }} />
+              </>
+            )
+          },
+          {
+            key: 'campus', label: <span><ClusterOutlined /> 校区（{scopes?.campuses?.length || 0}）</span>,
+            children: (
+              <>
+                <Alert type="info" showIcon style={{ marginBottom: 12 }}
+                  message="这张表回答的是「哪个校区漏配了」"
+                  description={
+                    <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+                      <b>单独配置</b> = 精确挂在该校区上的 Agent；
+                      <b>实际生效</b> = 加上从机构级与平台级继承下来的。
+                      两个数字分开，是为了避免「一个都没单独配过的校区」被误读成「没开 Agent」。
+                    </div>
+                  } />
+                <Table rowKey="id" size="small" loading={loading}
+                  dataSource={scopes?.campuses || []}
+                  columns={campusColumns} pagination={false}
+                  locale={{ emptyText: <Empty description="本机构下还没有校区，请先到「机构管理」创建" /> }}
+                  scroll={{ x: 900 }} />
+              </>
+            )
+          },
+          {
+            key: 'clazz', label: <span><TeamOutlined /> 班级（{scopes?.clazzes?.length || 0}）</span>,
+            children: (
+              <>
+                <Alert type="info" showIcon style={{ marginBottom: 12 }}
+                  message="这张表回答的是「哪个班漏配了」"
+                  description="班级级 Agent 只对该班师生可见；同校区其他班不受影响。实际生效数包含校区级、机构级与平台级继承。" />
+                <Table rowKey="id" size="small" loading={loading}
+                  dataSource={scopes?.clazzes || []}
+                  columns={clazzColumns} pagination={{ pageSize: 12 }}
+                  locale={{ emptyText: <Empty description="本机构下还没有班级，请先到「机构管理」创建" /> }}
+                  scroll={{ x: 1050 }} />
               </>
             )
           },
@@ -388,6 +670,11 @@ export default function Agents() {
           </Row>
           <Form.Item name="description" label="一句话说明">
             <Input placeholder="诊断 → 学 → 练 → 复习，讲清楚下一步先做什么" />
+          </Form.Item>
+          <Form.Item name="scopePath" label="生效范围"
+            extra="留空 = 全平台启用（仅平台管理员）。选到机构 = 该机构全部校区；选到班级 = 只有该班师生可见。">
+            <Cascader options={scopeOptions} changeOnSelect allowClear
+              placeholder="全平台 / 选择机构 · 校区 · 班级" style={{ width: '100%' }} />
           </Form.Item>
           <Row gutter={12}>
             <Col span={12}>

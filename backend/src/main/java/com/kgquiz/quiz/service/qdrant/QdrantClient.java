@@ -41,19 +41,29 @@ public class QdrantClient {
      * <p>历史 bug：直接 PUT 建集合，集合已存在时 Qdrant 返回 409，被当成失败并打
      * 「语义检索不可用」的 WARN —— 但集合其实一直可用，等于每次启动都报假警，
      * 真正的连接故障反而被淹没。这里改成先探测再决定是否创建。</p>
+     *
+     * @return true = 本次<b>新建</b>了集合（调用方据此决定要不要全量重建索引）
      */
     @SuppressWarnings("unchecked")
-    public void ensureCollection(int dim) {
-        // 1. 先探测：已存在直接返回，不打扰
+    public boolean ensureCollection(int dim) {
+        // 1. 先探测：已存在且有数据就跳过
         try {
             Map<String, Object> info = restClient.get()
                     .uri(base() + "/collections/" + collection())
                     .retrieve()
                     .body(Map.class);
-            if (info != null) {
-                Object status = info.get("result") instanceof Map<?, ?> r ? r.get("status") : null;
-                log.info("Qdrant collection {} 已就绪（状态 {}），跳过创建", collection(), status);
-                return;
+            if (info != null && info.get("result") instanceof Map<?, ?> r) {
+                Object status = r.get("status");
+                long points = r.get("points_count") instanceof Number n ? n.longValue() : -1L;
+                if (points == 0) {
+                    // 集合在但没有点：容器重启丢过数据（无持久化）时最常见。
+                    // 这种状态比「集合不存在」更危险 —— 检索接口照样返回成功，只是永远召回 0 条。
+                    log.warn("Qdrant collection {} 存在但为空（0 个向量），需全量重建索引", collection());
+                    return true;
+                }
+                log.info("Qdrant collection {} 已就绪（状态 {}，{} 个向量），跳过创建",
+                        collection(), status, points);
+                return false;
             }
         } catch (Exception e) {
             log.debug("collection {} 探测未命中，尝试创建: {}", collection(), e.getMessage());
@@ -72,13 +82,15 @@ public class QdrantClient {
                     .retrieve()
                     .toBodilessEntity();
             log.info("Qdrant collection {} 创建完成，语义检索可用", collection());
+            return true;
         } catch (Exception e) {
             if (String.valueOf(e.getMessage()).contains("409")) {
                 log.info("Qdrant collection {} 已存在（409），语义检索可用", collection());
-                return;
+                return false;
             }
             // 这里才是真的不可用：连不上、鉴权错、维度冲突等
             log.warn("Qdrant collection {} 创建失败，语义检索不可用: {}", collection(), e.getMessage());
+            return false;
         }
     }
 

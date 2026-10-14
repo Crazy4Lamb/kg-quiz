@@ -29,6 +29,9 @@ import java.util.Map;
  * <p>三层边界：<b>工具</b>是代码（{@code AgentToolCatalog}，这里只读展示）、
  * <b>编排</b>可配置（本类负责）、<b>权限</b>是运行时算的（不在此暴露任何配置入口）。</p>
  *
+ * <p>生效范围（机构 / 校区 / 班级）属于编排层，表达「在哪里启用这个 Agent」，
+ * 与「能读哪些数据」无关：越界 id 一律 403，不做静默过滤。</p>
+ *
  * <p>写接口限 ADMIN / ORG_ADMIN，且平台级 Agent 仅 ADMIN 可动；
  * 目标学生的归属校验走 {@code UserContext.checkStudentScope}。</p>
  */
@@ -48,11 +51,25 @@ public class AgentController {
         return R.ok(agentService.toolRegistry());
     }
 
-    /** Agent 列表：本机构 + 平台级 */
+    /**
+     * Agent 列表：本机构 + 平台级，可按校区 / 班级下钻。
+     *
+     * <p>{@code campusId} / {@code clazzId} 表达的是「在哪些组织单元生效」，
+     * 不是数据权限 —— 越界的 id 依旧由 {@code UserContext} 直接 403。</p>
+     */
     @GetMapping
     @RequireRole({UserRole.ORG_ADMIN, UserRole.ADMIN})
-    public R<List<Map<String, Object>>> list(@RequestParam(required = false) Long orgId) {
-        return R.ok(agentService.listAgents(orgId));
+    public R<List<Map<String, Object>>> list(@RequestParam(required = false) Long orgId,
+                                             @RequestParam(required = false) Long campusId,
+                                             @RequestParam(required = false) Long clazzId) {
+        return R.ok(agentService.listAgents(orgId, campusId, clazzId));
+    }
+
+    /** 生效范围下钻：各校区 / 班级下挂了多少 Agent */
+    @GetMapping("/scopes")
+    @RequireRole({UserRole.ORG_ADMIN, UserRole.ADMIN})
+    public R<Map<String, Object>> scopes() {
+        return R.ok(agentService.scopeOverview());
     }
 
     /** 我当前这个角色能看到的 Agent（面向前端的入口） */
@@ -68,7 +85,8 @@ public class AgentController {
     @PostMapping
     @RequireRole({UserRole.ADMIN, UserRole.ORG_ADMIN})
     public R<Map<String, Object>> save(@RequestBody AgentSaveReq req) {
-        return R.ok(agentService.saveAgent(req.id(), req.code(), req.orgId(), req.name(), req.description(),
+        return R.ok(agentService.saveAgent(req.id(), req.code(), req.orgId(), req.campusId(), req.clazzId(),
+                req.name(), req.description(),
                 req.targetRole(), req.systemPrompt(), req.model(), req.temperature(), req.maxTokens(),
                 req.enabled() == null ? 1 : (req.enabled() ? 1 : 0)));
     }

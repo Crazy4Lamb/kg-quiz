@@ -177,6 +177,19 @@ start-*.bat    原开发电脑的 Windows 启动脚本
 
 新增 verify-storyboard.py 与 e2e-storyboard.js 用于开发验证，可能依赖运行服务和演示数据；执行前请检查脚本配置。docs/verify-storyboard-result.txt 是已有验证记录，不代表新部署环境自动通过检查。
 
+## 大模型配置与机构分层管理
+
+- **大模型配置管理**：新增管理页面与配置表，支持供应商预设、协议、鉴权方式、接口地址、模型及采样参数。数据库中启用的配置优先于启动环境变量，可在管理台调整；密钥回显使用掩码，保存空密钥时保留原值。
+- **多协议接入**：配置支持 OpenAI 兼容、Anthropic、Gemini、Ollama、Volcengine 等协议选项；具体地址和鉴权按供应商要求设置，不同协议需使用匹配的模型与端点。
+- **机构层级**：新增校区管理员、班级所属校区及学生批量导入相关能力；平台、机构、校区、教师与学生的可见范围由后端校验。
+- **Agent 生效范围**：支持平台、机构、校区、班级层级的编排配置与范围总览。配置范围不代替数据权限，实际调用仍按当前登录身份授权。
+
+使用流程：有权限的管理员维护机构、校区与班级 → 创建相应管理账号或导入学生 → 配置大模型连接 → 在 Agent 管理中选择作用范围、绑定工具并检查预演／调用记录。
+
+迁移涉及 llm_config、组织层级和 Agent 范围字段，升级前备份数据库并检查 schema.sql / migration.sql。真实密钥只应放在部署环境或受控数据库，不应写进源码、验证记录或 Git；仓库不包含运行数据库。
+
+新增 verify-llm.py、verify-agent-scope.py、verify-org-hierarchy.py 及对应 e2e 脚本用于开发验证，依赖项和服务地址请按实际环境调整。solution-cube-line-plane-angle.html 为独立几何讲解示例，可在浏览器打开。
+
 ---
 
 # English Guide
@@ -337,3 +350,16 @@ Screenshots show the current application and a mathematics demo graph, without r
 Administrators inspect agents/tools and maintain permitted orchestration settings. Teachers generate or inspect explanations; students read the resulting segments. Visible controls and actions depend on role permissions. AI generation uses backend LLM environment variables; keep actual API keys out of source and Git.
 
 verify-storyboard.py and e2e-storyboard.js are development checks that may require running services and demo data. Review their settings first. docs/verify-storyboard-result.txt is an existing verification record, not proof that a new deployment passes automatically.
+
+## LLM Configuration and Organization Hierarchy
+
+- **LLM settings:** a management page and configuration table support provider presets, protocol/authentication, endpoints, models and sampling parameters. Enabled database settings override startup environment defaults. Keys are masked in management responses; saving an empty key preserves the existing value.
+- **Protocol choices:** OpenAI-compatible, Anthropic, Gemini, Ollama and Volcengine options are available. Use the provider's matching endpoint, authentication and model settings.
+- **Organization hierarchy:** campus administrators, campus-linked classes and bulk student import extend organization management. Platform, organization, campus, teacher and student data scopes are enforced by the backend.
+- **Agent scope:** orchestration can target platform, organization, campus or class levels, with scope overviews. Configuration scope does not replace runtime authorization.
+
+Workflow: authorized administrators maintain organizations/campuses/classes, create management accounts or import students, configure LLM access, then choose an Agent scope, bind tools and inspect dry runs/call logs.
+
+Database changes include llm_config, organization hierarchy and Agent scope fields. Back up databases and review schema.sql / migration.sql before upgrading. Keep real credentials in deployment environments or a controlled database, never source code, verification reports or Git. Runtime databases are not included in the repository.
+
+verify-llm.py, verify-agent-scope.py, verify-org-hierarchy.py and their e2e counterparts are development checks requiring suitable services and settings. solution-cube-line-plane-angle.html is a standalone geometry explanation example that can be opened in a browser.

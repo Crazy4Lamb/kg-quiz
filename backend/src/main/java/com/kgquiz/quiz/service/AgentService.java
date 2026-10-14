@@ -9,19 +9,27 @@ import com.kgquiz.quiz.common.ForbiddenException;
 import com.kgquiz.quiz.entity.AgentCallLog;
 import com.kgquiz.quiz.entity.AgentProfile;
 import com.kgquiz.quiz.entity.AgentTool;
+import com.kgquiz.quiz.entity.Campus;
+import com.kgquiz.quiz.entity.Clazz;
+import com.kgquiz.quiz.entity.Student;
 import com.kgquiz.quiz.mapper.AgentCallLogMapper;
 import com.kgquiz.quiz.mapper.AgentProfileMapper;
 import com.kgquiz.quiz.mapper.AgentToolMapper;
+import com.kgquiz.quiz.mapper.CampusMapper;
+import com.kgquiz.quiz.mapper.ClazzMapper;
+import com.kgquiz.quiz.mapper.StudentMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -38,6 +46,11 @@ import java.util.function.Supplier;
  * </ul>
  *
  * <p>换句话说：<b>配置只能决定「看不看得到这个按钮」，决定不了「能不能拿到这份数据」。</b></p>
+ *
+ * <p><b>生效范围（scope）是第四件事，别和权限混为一谈。</b>
+ * {@code org_id / campus_id / clazz_id} 三列表达的是「这个 Agent 在哪些组织单元启用」，
+ * 属于编排层；它不放开任何数据访问。范围落库前一律经
+ * {@link #resolveScope} 做机构归属校验，越界直接 403。</p>
  */
 @Slf4j
 @Service
@@ -49,6 +62,9 @@ public class AgentService {
     private final AgentProfileMapper agentProfileMapper;
     private final AgentToolMapper agentToolMapper;
     private final AgentCallLogMapper agentCallLogMapper;
+    private final CampusMapper campusMapper;
+    private final ClazzMapper clazzMapper;
+    private final StudentMapper studentMapper;
 
     private final DiagnosisService diagnosisService;
     private final LearningTaskService learningTaskService;
@@ -129,29 +145,178 @@ public class AgentService {
 
     // ==================== Agent 编排配置 ====================
 
-    /** 本机构 Agent + 平台级 Agent */
+    /**
+     * 生效范围解析结果。
+     *
+     * @param orgId   归属机构（平台级为 null）
+     * @param campusId 生效校区；null 表示机构内全部
+     * @param clazzId 生效班级；null 表示校区/机构内全部
+     */
+    public record Scope(Long orgId, Long campusId, Long clazzId) {
+    }
+
+    /**
+     * 把请求里的 orgId / campusId / clazzId 收敛成一组合法范围。
+     *
+     * <p>规则只有三条，但每条都是硬边界：</p>
+     * <ol>
+     *   <li><b>不能跳级</b>：给了 clazzId 就必须有 campusId —— 允许反查回填，不允许凭空指定；</li>
+     *   <li><b>不能错挂</b>：校区必须属于该机构、班级必须属于该校区，否则 403；</li>
+     *   <li><b>平台级不能带校区/班级</b>：orgId 为 null 时这两列必须为空，
+     *       否则「全平台生效」和「只对某班生效」会自相矛盾。</li>
+     * </ol>
+     *
+     * <p>注意这仍然只是「在哪里启用」，不放开任何数据访问。</p>
+     */
+    private Scope resolveScope(Long requestedOrgId, Long campusId, Long clazzId) {
+        Long writeOrg = requestedOrgId == null ? null : UserContext.resolveWriteOrgId(requestedOrgId);
+
+        if (clazzId != null) {
+            Clazz clazz = clazzMapper.selectById(clazzId);
+            if (clazz == null) {
+                throw new BizException("班级不存在: " + clazzId);
+            }
+            // 越界由 checkOrgScope 兜（管理员放行，机构管理员比对自己机构）
+            UserContext.checkOrgScope(clazz.getOrgId());
+            if (writeOrg != null && !writeOrg.equals(clazz.getOrgId())) {
+                throw new ForbiddenException("班级不属于该机构: " + clazzId);
+            }
+            if (campusId != null && !campusId.equals(clazz.getCampusId())) {
+                throw new BizException("班级不属于该校区，请检查校区选择");
+            }
+            // campusId 允许省略，由班级反查回填 —— 避免前端把同一事实存两遍且可能存不一致
+            return new Scope(clazz.getOrgId(), clazz.getCampusId(), clazzId);
+        }
+
+        if (campusId != null) {
+            Campus campus = campusMapper.selectById(campusId);
+            if (campus == null) {
+                throw new BizException("校区不存在: " + campusId);
+            }
+            UserContext.checkOrgScope(campus.getOrgId());
+            if (writeOrg != null && !writeOrg.equals(campus.getOrgId())) {
+                throw new ForbiddenException("校区不属于该机构: " + campusId);
+            }
+            return new Scope(campus.getOrgId(), campusId, null);
+        }
+
+        if (writeOrg == null && requestedOrgId == null && !UserContext.require().isAdmin()) {
+            throw new ForbiddenException("平台级 Agent 仅平台管理员可维护");
+        }
+        return new Scope(writeOrg, null, null);
+    }
+
+    /**
+     * 本机构 Agent + 平台级 Agent。
+     *
+     * <p>这里必须写成 {@code (org_id = ? OR org_id IS NULL)} 而不能用
+     * {@code in(orgId, orgId, null)} —— 后者会生成 {@code org_id IN (2, NULL)}，
+     * 而 {@code NULL} 在 IN 列表里永远不匹配，平台级 Agent 会被静默漏掉。
+     * 这个坑只在「按机构筛选」时才暴露：不筛选时条件整个不加，所以之前一直没发现。</p>
+     */
     private List<AgentProfile> listProfiles(Long orgId) {
         LambdaQueryWrapper<AgentProfile> q = new LambdaQueryWrapper<>();
         if (orgId != null) {
-            q.in(AgentProfile::getOrgId, orgId, (Long) null);
+            q.and(w -> w.eq(AgentProfile::getOrgId, orgId).or().isNull(AgentProfile::getOrgId));
         }
         return agentProfileMapper.selectList(q);
     }
 
-    public List<Map<String, Object>> listAgents(Long orgIdFilter) {
+    /**
+     * Agent 列表：本机构 + 平台级，可按校区 / 班级下钻。
+     *
+     * <p>筛选语义是「<b>在哪些组织单元生效</b>」，不是「谁能看到」：
+     * 选中某个校区时，平台级 + 本机构级 + 该校区级 + 该校区下班级级的 Agent 都会列出，
+     * 因为它们确实都在这个校区生效。</p>
+     */
+    public List<Map<String, Object>> listAgents(Long orgIdFilter, Long campusId, Long clazzId) {
         Long scope = UserContext.scopeOrgId();
         // 显式传了 orgId 就要落在可见范围内
         if (orgIdFilter != null) {
             UserContext.checkOrgScope(orgIdFilter);
+        }
+        if (campusId != null) {
+            requireCampus(campusId);
+        }
+        if (clazzId != null) {
+            requireClazz(clazzId);
         }
         Long filter = orgIdFilter != null ? orgIdFilter : scope;
         List<AgentProfile> profiles = listProfiles(filter);
 
         List<Map<String, Object>> out = new ArrayList<>();
         for (AgentProfile p : profiles) {
+            if (!matchesScope(p, campusId, clazzId)) {
+                continue;
+            }
             out.add(toView(p));
         }
         return out;
+    }
+
+    /**
+     * 该 Agent 是否在给定的校区 / 班级生效。
+     *
+     * <p>粒度只允许「粗的覆盖细的」：平台级（orgId=null）处处生效，
+     * 机构级在本机构处处生效，校区级在本校区处处生效，班级级只在本班生效。</p>
+     */
+    private boolean matchesScope(AgentProfile p, Long campusId, Long clazzId) {
+        if (clazzId != null) {
+            if (p.getClazzId() != null) {
+                return p.getClazzId().equals(clazzId);
+            }
+            if (p.getCampusId() != null) {
+                // 校区级 Agent 是否覆盖这个班，看班级是否属于该校区
+                Clazz clazz = clazzMapper.selectById(clazzId);
+                return clazz != null && p.getCampusId().equals(clazz.getCampusId());
+            }
+            return true; // 机构级 / 平台级
+        }
+        if (campusId != null) {
+            if (p.getCampusId() != null) {
+                return p.getCampusId().equals(campusId);
+            }
+            return true; // 机构级 / 平台级
+        }
+        return true;
+    }
+
+    private Campus requireCampus(Long id) {
+        Campus campus = campusMapper.selectById(id);
+        if (campus == null) {
+            throw new BizException("校区不存在: " + id);
+        }
+        UserContext.checkOrgScope(campus.getOrgId());
+        return campus;
+    }
+
+    /**
+     * 该 Agent 的生效范围是否覆盖这名学生。
+     *
+     * <p>与 {@link #withinCallerScope} 同构，只是把「调用者的班级」换成「目标学生的班级」，
+     * 复用同一套「粗的覆盖细的」规则。</p>
+     */
+    private boolean agentCoversStudent(AgentProfile agent, Long studentId) {
+        if (agent.getClazzId() == null && agent.getCampusId() == null) {
+            return true; // 机构级 / 平台级
+        }
+        Student student = studentMapper.selectById(studentId);
+        if (student == null) {
+            return false;
+        }
+        if (agent.getClazzId() != null) {
+            return agent.getClazzId().equals(student.getClazzId());
+        }
+        return agent.getCampusId().equals(student.getCampusId());
+    }
+
+    private Clazz requireClazz(Long id) {
+        Clazz clazz = clazzMapper.selectById(id);
+        if (clazz == null) {
+            throw new BizException("班级不存在: " + id);
+        }
+        UserContext.checkOrgScope(clazz.getOrgId());
+        return clazz;
     }
 
     private Map<String, Object> toView(AgentProfile p) {
@@ -174,11 +339,27 @@ public class AgentService {
             tm.put("paramOverride", b.getParamOverride());
             tools.add(tm);
         }
+        String campusName = null;
+        if (p.getCampusId() != null) {
+            Campus c = campusMapper.selectById(p.getCampusId());
+            campusName = c == null ? null : c.getName();
+        }
+        String clazzName = null;
+        if (p.getClazzId() != null) {
+            Clazz c = clazzMapper.selectById(p.getClazzId());
+            clazzName = c == null ? null : c.getName();
+        }
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", p.getId());
         m.put("code", p.getCode());
         m.put("orgId", p.getOrgId());
+        m.put("campusId", p.getCampusId());
+        m.put("clazzId", p.getClazzId());
         m.put("platformLevel", p.getOrgId() == null);
+        m.put("scopeLevel", scopeLevel(p));
+        m.put("scopeLabel", scopeLabel(p, campusName, clazzName));
+        m.put("campusName", campusName);
+        m.put("clazzName", clazzName);
         m.put("name", p.getName());
         m.put("description", p.getDescription());
         m.put("targetRole", p.getTargetRole());
@@ -192,9 +373,33 @@ public class AgentService {
         return m;
     }
 
+    private static String scopeLevel(AgentProfile p) {
+        if (p.getOrgId() == null) {
+            return "PLATFORM";
+        }
+        if (p.getCampusId() == null) {
+            return "ORG";
+        }
+        if (p.getClazzId() == null) {
+            return "CAMPUS";
+        }
+        return "CLAZZ";
+    }
+
+    private static String scopeLabel(AgentProfile p, String campusName, String clazzName) {
+        return switch (scopeLevel(p)) {
+            case "PLATFORM" -> "全平台";
+            case "ORG" -> "本机构全部校区";
+            case "CAMPUS" -> "校区：" + (campusName == null ? "#" + p.getCampusId() : campusName);
+            default -> "班级：" + (clazzName == null ? "#" + p.getClazzId() : clazzName)
+                    + (campusName == null ? "" : "（" + campusName + "）");
+        };
+    }
+
     /** 新建 / 更新 Agent 编排配置。二期开放 systemPrompt 在线编辑。 */
     @Transactional
-    public Map<String, Object> saveAgent(Long id, String code, Long orgId, String name, String description,
+    public Map<String, Object> saveAgent(Long id, String code, Long orgId, Long campusId, Long clazzId,
+                                         String name, String description,
                                          String targetRole, String systemPrompt, String model,
                                          Double temperature, Integer maxTokens, Integer enabled) {
         CurrentUser user = UserContext.require();
@@ -208,7 +413,7 @@ public class AgentService {
         if (orgId == null && !user.isAdmin()) {
             throw new ForbiddenException("平台级 Agent 仅平台管理员可维护");
         }
-        Long writeOrg = orgId == null ? null : UserContext.resolveWriteOrgId(orgId);
+        Scope scope = resolveScope(orgId, campusId, clazzId);
 
         AgentProfile p;
         if (id != null) {
@@ -231,7 +436,9 @@ public class AgentService {
             p.setCode(code.trim());
             p.setCreatedAt(java.time.LocalDateTime.now());
         }
-        p.setOrgId(writeOrg);
+        p.setOrgId(scope.orgId());
+        p.setCampusId(scope.campusId());
+        p.setClazzId(scope.clazzId());
         p.setName(name.trim());
         p.setDescription(description == null ? "" : description.trim());
         p.setTargetRole(role);
@@ -343,6 +550,11 @@ public class AgentService {
         UserContext.checkOrgScope(agent.getOrgId());
         // 目标学生的归属校验 —— 沿用既有边界，教师只能预演自己范围内的学生
         UserContext.checkStudentScope(studentId);
+        // 生效范围校验：不能预演一个「不覆盖该学生」的 Agent，
+        // 否则预演结果会让人误以为它在该班也可用
+        if (!agentCoversStudent(agent, studentId)) {
+            throw new ForbiddenException("该 Agent 的生效范围不包含这名学生，无法预演");
+        }
 
         List<AgentTool> binds = agentToolMapper.selectList(
                 new LambdaQueryWrapper<AgentTool>()
@@ -616,8 +828,23 @@ public class AgentService {
         }
     }
 
-    /** 供其他模块复用：某个角色能看到的 Agent（按 targetRole 匹配） */
+    /**
+     * 供其他模块复用：当前调用者这个角色能看到的 Agent。
+     *
+     * <p>三道过滤依次叠加：</p>
+     * <ol>
+     *   <li>{@code targetRole} 匹配且已启用（SQL 层）；</li>
+     *   <li>机构边界 —— 非平台级 Agent 必须落在调用者的机构内；</li>
+     *   <li><b>生效范围</b> —— 调用者只看到「在他所在的校区 / 班级里生效」的 Agent：
+     *       班级级只对该班的教师与学生可见；校区级对该校区教师可见；
+     *       机构级与平台级对全体本机构 / 全平台人员可见。</li>
+     * </ol>
+     *
+     * <p>第 3 条是这轮加的。它让「给某个班单独配一个 Agent」在运行时真的成立，
+     * 而不是只在管理台里躺着好看。</p>
+     */
     public List<Map<String, Object>> agentsForRole(UserRole role) {
+        CurrentUser user = UserContext.peek();
         List<AgentProfile> profiles = agentProfileMapper.selectList(
                 new LambdaQueryWrapper<AgentProfile>()
                         .eq(AgentProfile::getTargetRole, role.name())
@@ -627,8 +854,152 @@ public class AgentService {
             if (p.getOrgId() != null && !UserContext.inScope(p.getOrgId())) {
                 continue;
             }
+            if (user != null && !withinCallerScope(p, user)) {
+                continue;
+            }
             out.add(toView(p));
         }
         return out;
+    }
+
+    /**
+     * 该 Agent 是否在调用者的校区 / 班级范围内生效。
+     *
+     * <p>调用者没有校区归属（平台管理员、或未挂校区的机构管理员）时一律放行，
+     * 因为他们的职责本来就是跨范围查看。</p>
+     *
+     * <p>学生账号的 {@code clazzIds} 恒为空（只有教师才带班），所以班级级判定要走
+     * {@code studentId → student.clazz_id} 这条路；查不到归属时按「不属于任何班」处理，
+     * 从而只看到机构级与平台级 Agent —— 这是收敛方向，宁可少看不可越界。</p>
+     */
+    private boolean withinCallerScope(AgentProfile p, CurrentUser user) {
+        if (p.getClazzId() != null) {
+            return callerClazzIds(user).contains(p.getClazzId());
+        }
+        if (p.getCampusId() != null) {
+            if (user.campusId() == null) {
+                return false;
+            }
+            return p.getCampusId().equals(user.campusId());
+        }
+        return true; // 机构级 / 平台级
+    }
+
+    /**
+     * 调用者所属的全部班级：教师是带班集合（可能多个），学生是档案上那一个。
+     * 之所以要算成集合而不是单个值，是因为教师带三个班时，
+     * 挂在其中任意一个班上的 Agent 都该对他可见。
+     */
+    private Set<Long> callerClazzIds(CurrentUser user) {
+        if (user.isStudent()) {
+            if (user.studentId() == null) {
+                return Set.of();
+            }
+            Student student = studentMapper.selectById(user.studentId());
+            return student == null || student.getClazzId() == null
+                    ? Set.of() : Set.of(student.getClazzId());
+        }
+        return new LinkedHashSet<>(user.clazzIds());
+    }
+
+    // ==================== 生效范围下钻（校区 / 班级总览）====================
+
+    /**
+     * 按校区 / 班级聚合的 Agent 生效总览。
+     *
+     * <p>给管理台回答两个问题：「这个校区 / 班里都启用了哪些 Agent」，
+     * 以及「有没有漏配」。返回的 {@code directCount} 只统计<b>精确挂在该单元上</b>的 Agent，
+     * {@code effectiveCount} 才算上从机构级、平台级继承下来的——
+     * 否则一个都没单独配过的班级会显示成「0 个 Agent」，容易误判为没开。</p>
+     */
+    public Map<String, Object> scopeOverview() {
+        Long scope = UserContext.scopeOrgId();
+        List<AgentProfile> profiles = listProfiles(scope);
+
+        List<Map<String, Object>> campusViews = new ArrayList<>();
+        List<Map<String, Object>> clazzViews = new ArrayList<>();
+
+        List<Campus> campuses = campusMapper.selectList(new LambdaQueryWrapper<Campus>()
+                .eq(scope != null, Campus::getOrgId, scope)
+                .orderByAsc(Campus::getId));
+        List<Clazz> clazzes = clazzMapper.selectList(new LambdaQueryWrapper<Clazz>()
+                .eq(scope != null, Clazz::getOrgId, scope)
+                .orderByAsc(Clazz::getId));
+
+        for (Campus campus : campuses) {
+            List<Clazz> children = clazzes.stream()
+                    .filter(c -> Objects.equals(c.getCampusId(), campus.getId()))
+                    .toList();
+            Map<String, Object> cv = new LinkedHashMap<>();
+            cv.put("id", campus.getId());
+            cv.put("name", campus.getName());
+            cv.put("orgId", campus.getOrgId());
+            cv.put("clazzCount", children.size());
+            cv.put("directCount", countExact(profiles, p -> p.getCampusId() != null
+                    && p.getCampusId().equals(campus.getId())));
+            cv.put("effectiveCount", countExact(profiles, p -> matchesScope(p, campus.getId(), null)));
+            cv.put("directAgents", briefAgents(profiles, p -> p.getCampusId() != null
+                    && p.getCampusId().equals(campus.getId())));
+            campusViews.add(cv);
+        }
+
+        for (Clazz clazz : clazzes) {
+            Map<String, Object> cv = new LinkedHashMap<>();
+            cv.put("id", clazz.getId());
+            cv.put("name", clazz.getName());
+            cv.put("orgId", clazz.getOrgId());
+            cv.put("campusId", clazz.getCampusId());
+            cv.put("grade", clazz.getGrade());
+            cv.put("subject", clazz.getSubject());
+            cv.put("directCount", countExact(profiles, p -> p.getClazzId() != null
+                    && p.getClazzId().equals(clazz.getId())));
+            cv.put("effectiveCount", countExact(profiles, p -> matchesScope(p, null, clazz.getId())));
+            cv.put("directAgents", briefAgents(profiles, p -> p.getClazzId() != null
+                    && p.getClazzId().equals(clazz.getId())));
+            clazzViews.add(cv);
+        }
+        clazzViews.sort(Comparator
+                .comparing((Map<String, Object> m) -> (String) nz(m.get("grade")))
+                .thenComparing(m -> String.valueOf(nz(m.get("name")))));
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("orgScope", scope);
+        out.put("campuses", campusViews);
+        out.put("clazzes", clazzViews);
+        out.put("totalAgents", profiles.size());
+        out.put("platformAgents", countExact(profiles, p -> p.getOrgId() == null));
+        return out;
+    }
+
+    private int countExact(List<AgentProfile> profiles, java.util.function.Predicate<AgentProfile> cond) {
+        int n = 0;
+        for (AgentProfile p : profiles) {
+            if (cond.test(p)) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    private List<Map<String, Object>> briefAgents(List<AgentProfile> profiles,
+                                                 java.util.function.Predicate<AgentProfile> cond) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (AgentProfile p : profiles) {
+            if (!cond.test(p)) {
+                continue;
+            }
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", p.getId());
+            m.put("code", p.getCode());
+            m.put("name", p.getName());
+            m.put("targetRole", p.getTargetRole());
+            m.put("enabled", p.getEnabled());
+            out.add(m);
+        }
+        return out;
+    }
+
+    private static String nz(Object o) {
+        return o == null ? "" : String.valueOf(o);
     }
 }

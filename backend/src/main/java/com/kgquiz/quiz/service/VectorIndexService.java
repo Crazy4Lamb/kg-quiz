@@ -29,13 +29,29 @@ public class VectorIndexService {
     private final GraphStore graphStore;
     private final KgProperties kgProperties;
 
+    /**
+     * 启动时确保向量索引就绪。
+     *
+     * <p>集合不存在、或存在但没有点时，全量重建 —— 「有集合但 0 个点」是最坏状态：
+     * {@code available()} 返回 true，语义检索看起来正常，却永远召回 0 条，
+     * 问题要到功能上不去才被发现。Qdrant 若挂了 volume（正常部署）重启不丢数据，
+     * 不会走到重建分支；丢了也能自愈，因为向量不存 Neo4j，全量重算即可。</p>
+     */
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() {
-        if (qdrantClient.enabled() && embeddingService.available()) {
-            qdrantClient.ensureCollection(embeddingService.dim());
-        } else {
+        if (!qdrantClient.enabled() || !embeddingService.available()) {
             log.warn("向量索引未启用（Qdrant enabled={}, embedding available={}）",
                     qdrantClient.enabled(), embeddingService.available());
+            return;
+        }
+        boolean needRebuild = qdrantClient.ensureCollection(embeddingService.dim());
+        if (needRebuild) {
+            log.info("向量索引缺失或为空，启动全量重建（避免召回恒为 0 却看不出异常）");
+            try {
+                rebuild();
+            } catch (Exception e) {
+                log.warn("向量索引自动重建失败，语义检索将退化为字面相似度: {}", e.getMessage());
+            }
         }
     }
 

@@ -160,3 +160,16 @@ Screenshots show the current application and a mathematics demo graph, without r
 Administrators inspect agents/tools and maintain permitted orchestration settings. Teachers generate or inspect explanations; students read the resulting segments. Visible controls and actions depend on role permissions. AI generation uses backend LLM environment variables; keep actual API keys out of source and Git.
 
 verify-storyboard.py and e2e-storyboard.js are development checks that may require running services and demo data. Review their settings first. docs/verify-storyboard-result.txt is an existing verification record, not proof that a new deployment passes automatically.
+
+## LLM Configuration and Organization Hierarchy
+
+- **LLM settings:** a management page and configuration table support provider presets, protocol/authentication, endpoints, models and sampling parameters. Enabled database settings override startup environment defaults. Keys are masked in management responses; saving an empty key preserves the existing value.
+- **Protocol choices:** OpenAI-compatible, Anthropic, Gemini, Ollama and Volcengine options are available. Use the provider's matching endpoint, authentication and model settings.
+- **Organization hierarchy:** campus administrators, campus-linked classes and bulk student import extend organization management. Platform, organization, campus, teacher and student data scopes are enforced by the backend.
+- **Agent scope:** orchestration can target platform, organization, campus or class levels, with scope overviews. Configuration scope does not replace runtime authorization.
+
+Workflow: authorized administrators maintain organizations/campuses/classes, create management accounts or import students, configure LLM access, then choose an Agent scope, bind tools and inspect dry runs/call logs.
+
+Database changes include llm_config, organization hierarchy and Agent scope fields. Back up databases and review schema.sql / migration.sql before upgrading. Keep real credentials in deployment environments or a controlled database, never source code, verification reports or Git. Runtime databases are not included in the repository.
+
+verify-llm.py, verify-agent-scope.py, verify-org-hierarchy.py and their e2e counterparts are development checks requiring suitable services and settings. solution-cube-line-plane-angle.html is a standalone geometry explanation example that can be opened in a browser.

@@ -128,7 +128,6 @@ public final class LlmPresetCatalog {
                     "", "/v1/chat/completions", LlmAuth.BEARER,
                     "", List.of(), false,
                     "适合中转站 / 内部 AI 网关。协议与鉴权可自由组合（如 OpenAI 体 + 自定义 header）。"));
-    }
 
     public static List<Preset> all() {
         return PRESETS;
@@ -161,6 +160,8 @@ public final class LlmPresetCatalog {
         m.put("models", p.models());
         m.put("keyRequired", p.keyRequired());
         m.put("free", p.free());
+        // 前端要靠这个字段提示「该协议无原生 JSON 模式，靠提示词约束」
+        m.put("jsonMode", p.protocol().supportsJsonMode());
         m.put("note", p.note());
         return m;
     }

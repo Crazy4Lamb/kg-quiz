@@ -71,14 +71,38 @@ public class ContentService {
         return ALL_TYPES;
     }
 
+    /**
+     * 内容生成能力状态。
+     *
+     * <p>返回<b>真实生效</b>的协议 / 厂商 / 模型，而不只是一个布尔值 ——
+     * 教师看到「已就绪」时需要知道是谁生成的，否则无法判断内容质量来自哪个模型。</p>
+     */
     public Map<String, Object> status() {
+        LlmClient.LlmSettings s = llm.settings();
+        boolean available = llm.available();
+        String reason = llm.unavailableReason();
+
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("available", llm.available());
-        m.put("model", llm.model());
-        m.put("reason", llm.available() ? "" : llm.unavailableReason());
+        m.put("available", available);
+        m.put("model", s.model());
+        m.put("reason", available ? (reason == null ? "" : reason) : reason);
+        // 以下为状态条展示用
+        m.put("protocol", s.protocol().name());
+        m.put("protocolLabel", s.protocol().label());
+        m.put("vendor", vendorOf(s));
+        m.put("source", s.source());
+        m.put("keyRequired", s.keyRequired());
+        m.put("supportsJsonMode", s.protocol().supportsJsonMode());
         m.put("types", ALL_TYPES.stream()
                 .map(t -> Map.of("value", t, "label", TYPE_LABEL.get(t))).toList());
         return m;
+    }
+
+    /** 从预设编码回填厂商名；自定义配置没有预设，返回 null */
+    private static String vendorOf(LlmClient.LlmSettings s) {
+        com.kgquiz.quiz.llm.LlmPresetCatalog.Preset p =
+                com.kgquiz.quiz.llm.LlmPresetCatalog.byCode(s.presetCode());
+        return p == null ? null : p.vendor();
     }
 
     // ==================== 查询 ====================

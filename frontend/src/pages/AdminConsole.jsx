@@ -10,6 +10,7 @@ import { readSession, ROLE, ROLE_LABEL, ROLE_COLOR } from '../auth.js';
 const ROLE_OPTIONS = [
   { value: ROLE.ADMIN, label: '平台管理员' },
   { value: ROLE.ORG_ADMIN, label: '机构管理员' },
+  { value: ROLE.CAMPUS_ADMIN, label: '校区管理员' },
   { value: ROLE.TEACHER, label: '教师' },
   { value: ROLE.STUDENT, label: '学生' }
 ];

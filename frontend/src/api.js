@@ -64,6 +64,22 @@ export const api = {
   listOrgStudents: (orgId, params) => http.get(`/orgs/${orgId}/students`, { params }),
   moveStudent: (studentId, clazzId) => http.put(`/orgs/students/${studentId}/clazz`, { clazzId }),
 
+  // 班级下钻：班主任 + 任课教师 + 学生名单 + 子班，一次拿齐
+  clazzDetail: (id) => http.get(`/orgs/clazzes/${id}/detail`),
+  // 学生批量导入到班级（建档 + 建 stu{id} 账号 + 归班）
+  importClazzStudents: (clazzId, data) => http.post(`/orgs/clazzes/${clazzId}/students/import`, data),
+
+  // 校区管理员：校区这一层的负责人，权限被 campusId 限死
+  listCampusAdmins: (params) => http.get('/orgs/campus-admins', { params }),
+  createCampusAdmin: (data) => http.post('/orgs/campus-admins', data),
+  updateCampusAdmin: (userId, data) => http.put(`/orgs/campus-admins/${userId}`, data),
+  setCampusAdminEnabled: (userId, enabled) => http.put(`/orgs/campus-admins/${userId}/enabled`, { enabled }),
+  resetCampusAdminPassword: (userId, data) => http.put(`/orgs/campus-admins/${userId}/password`, data),
+  deleteCampusAdmin: (userId) => http.delete(`/orgs/campus-admins/${userId}`),
+  /** 校区内可提升为管理员的已有账号 */
+  adminCandidates: (campusId) => http.get(`/orgs/campuses/${campusId}/admin-candidates`),
+  promoteCampusAdmin: (userId, campusId) => http.post(`/orgs/campus-admins/${userId}/promote`, { campusId }),
+
   // 图谱
   listGraphs: (params) => http.get('/graphs', { params }),
   createGraph: (data) => http.post('/graphs', data),
@@ -184,9 +200,10 @@ export const api = {
   applyMapping: (data) => http.post('/questions/mapping/apply', data),
   removeMapping: (questionId, nodeId) => http.delete(`/questions/mapping/${questionId}/${nodeId}`),
 
-  // Agent 配置域：工具注册表（只读）+ 编排配置 + 上下文预演
+  // Agent 配置域：工具注册表（只读）+ 编排配置 + 上下文预演 + 生效范围下钻
   agentTools: () => http.get('/agents/tools'),
   listAgents: (params) => http.get('/agents', { params }),
+  agentScopes: () => http.get('/agents/scopes'),
   myAgents: () => http.get('/agents/mine'),
   saveAgent: (data) => http.post('/agents', data),
   setAgentEnabled: (id, enabled) => http.put(`/agents/${id}/enabled`, null, { params: { enabled } }),
@@ -197,7 +214,14 @@ export const api = {
   // 讲解 IR：分镜是讲解的唯一真源，Markdown / 教案都从它渲染
   studentStoryboard: (nodeId) => http.get(`/contents/node/${nodeId}/storyboard`),
   rerenderContent: (id, data) => http.post(`/contents/${id}/rerender`, data),
-  recheckContent: (id) => http.post(`/contents/${id}/recheck`)
+  recheckContent: (id) => http.post(`/contents/${id}/recheck`),
+
+  // 大模型接入：多协议 + 预设 + 运行时切换
+  llmOverview: () => http.get('/llm/overview'),
+  llmStatus: () => http.get('/llm/status'),
+  saveLlmConfig: (data) => http.post('/llm/config', data),
+  setLlmEnabled: (data) => http.post('/llm/config/enabled', data),
+  testLlm: (data) => http.post('/llm/test', data)
 };
 
 export const unwrap = (r) => r?.data ?? r;
