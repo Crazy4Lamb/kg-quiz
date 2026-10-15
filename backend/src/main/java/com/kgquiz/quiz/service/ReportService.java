@@ -55,6 +55,7 @@ public class ReportService {
     private final AnswerRecordMapper answerRecordMapper;
     private final ExamMapper examMapper;
     private final KgProperties kg;
+    private final StudentAccessService studentAccessService;
 
     // ---------------- 错题本 ----------------
 
@@ -287,17 +288,7 @@ public class ReportService {
     // ---------------- 内部 ----------------
 
     private Student requireStudent(Long studentId) {
-        Student student = studentMapper.selectById(studentId);
-        if (student == null) {
-            throw new BizException("学生不存在: " + studentId);
-        }
-        // 跨机构一律 403：报告与错题本同样受租户边界约束
-        if (student.getOrgId() != null) {
-            UserContext.checkOrgScope(student.getOrgId());
-        } else if (!UserContext.require().isAdmin()) {
-            throw new BizException("学生不存在: " + studentId);
-        }
-        return student;
+        return studentAccessService.requireStudent(studentId);
     }
 
     /** 得分率 < 100% 即视为错题（含部分给分的填空/简答） */

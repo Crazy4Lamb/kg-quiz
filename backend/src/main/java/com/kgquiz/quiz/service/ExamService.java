@@ -72,6 +72,7 @@ public class ExamService {
     private final StudentNodeStateMapper studentNodeStateMapper;
     private final KgProperties kg;
     private final RecommendService recommendService;
+    private final StudentAccessService studentAccessService;
 
     /** 打分权重：与 RecommendService 默认规则一致，公式真源统一在 RecommendService.priorityScore */
     private static final double MASTERY_WEIGHT = 0.7;
@@ -82,11 +83,7 @@ public class ExamService {
      * 生成出题方案（PENDING，确认后才可答题）
      */
     public Map<String, Object> generatePlan(PlanGenerateReq req) throws Exception {
-        Student student = studentMapper.selectById(req.studentId());
-        if (student == null) {
-            throw new BizException("学生不存在: " + req.studentId());
-        }
-        UserContext.checkOrgScope(student.getOrgId());
+        Student student = studentAccessService.requireStudent(req.studentId());
         StudentGraph sg = studentGraphMapper.selectOne(new LambdaQueryWrapper<StudentGraph>()
                 .eq(StudentGraph::getStudentId, req.studentId())
                 .orderByDesc(StudentGraph::getId)
@@ -356,11 +353,7 @@ public class ExamService {
      */
     @Transactional
     public Map<String, Object> generatePracticeForStudent(Long studentId, Long nodeId, Integer count) {
-        Student student = studentMapper.selectById(studentId);
-        if (student == null) {
-            throw new BizException("学生不存在: " + studentId);
-        }
-        UserContext.checkOrgScope(student.getOrgId());
+        Student student = studentAccessService.requireStudent(studentId);
         int n = count == null ? 5 : Math.max(1, Math.min(20, count));
 
         GraphNode node = nodeId == null ? null : graphStore.findNode(nodeId);
@@ -509,11 +502,7 @@ public class ExamService {
 
     /** 学生掌握度总览 */
     public Map<String, Object> masteryOverview(Long studentId) {
-        Student owner = studentMapper.selectById(studentId);
-        if (owner == null) {
-            throw new BizException("学生不存在: " + studentId);
-        }
-        UserContext.checkOrgScope(owner.getOrgId());
+        Student owner = studentAccessService.requireStudent(studentId);
         StudentGraph sg = studentGraphMapper.selectOne(new LambdaQueryWrapper<StudentGraph>()
                 .eq(StudentGraph::getStudentId, studentId)
                 .orderByDesc(StudentGraph::getId)

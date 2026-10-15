@@ -533,10 +533,10 @@ public class AgentService {
     // ==================== 上下文预演（一期无 LLM 的「试运行」）====================
 
     /**
-     * 上下文预演：<b>以指定学生的身份</b>把该 Agent 挂载的只读工具真跑一遍。
+     * 上下文预演：在操作人的授权范围内读取指定学生的学习上下文，执行只读工具。
      *
      * <p>它回答的是「这个 Agent 以某个人的身份，<b>到底能拿到什么数据</b>」，
-     * 而不是「它会怎么回答」—— 后者要等 Agent 运行时接上才有意义。
+     * 模型对话由后续 Agent 运行时负责。
      * 因此预演<b>不调用大模型、不写任何业务数据</b>，
      * 只往 {@code agent_call_log} 记一条观测。</p>
      *
@@ -547,9 +547,12 @@ public class AgentService {
     public Map<String, Object> dryRun(String code, Long studentId) {
         AgentProfile agent = requireByCode(code);
         // 机构边界：平台级 Agent 谁都能看，本机构 Agent 仅本机构
-        UserContext.checkOrgScope(agent.getOrgId());
+        if (agent.getOrgId() != null) {
+            UserContext.checkOrgScope(agent.getOrgId());
+        }
         // 目标学生的归属校验 —— 沿用既有边界，教师只能预演自己范围内的学生
         UserContext.checkStudentScope(studentId);
+        studentService.requireStudent(studentId);
         // 生效范围校验：不能预演一个「不覆盖该学生」的 Agent，
         // 否则预演结果会让人误以为它在该班也可用
         if (!agentCoversStudent(agent, studentId)) {
@@ -578,9 +581,9 @@ public class AgentService {
         }
         try {
             Map<String, Object> sg = studentService.studentGraph(studentId);
-            Object gid = sg == null ? null : sg.get("graphId");
-            if (gid instanceof Number n) {
-                graphId = n.longValue();
+            Object template = sg == null ? null : sg.get("graph");
+            if (template instanceof com.kgquiz.quiz.entity.Graph g) {
+                graphId = g.getId();
             }
         } catch (Exception e) {
             log.debug("dry-run 图谱上下文获取失败: {}", e.getMessage());
@@ -624,8 +627,8 @@ public class AgentService {
         out.put("agentCode", agent.getCode());
         out.put("agentName", agent.getName());
         out.put("targetStudentId", studentId);
-        out.put("identityNote", "预演以 studentId=" + studentId + " 的学生身份执行，"
-                + "能看到哪些数据由后端 UserContext 实时判定，与本配置无关");
+        out.put("identityNote", "预演使用当前操作人的授权范围，读取 studentId=" + studentId
+                + " 的学习上下文；不切换学生登录身份，也不调用大模型。");
         out.put("focusNodeId", focusNodeId);
         out.put("focusKeyword", focusKeyword);
         out.put("graphId", graphId);
@@ -668,10 +671,11 @@ public class AgentService {
             case "my_tasks_today", "student_tasks" -> {
                 Map<String, Object> t = learningTaskService.overview(studentId);
                 brief.put("summary", "诊断 → 学 → 练 → 复习 任务清单");
-                Object pending = t.get("pending");
-                Object done = t.get("done");
-                brief.put("pendingCount", pending instanceof List<?> l ? l.size() : 0);
-                brief.put("doneCount", done instanceof List<?> l ? l.size() : 0);
+                Object tasks = t.get("tasks");
+                long done = tasks instanceof List<?> list ? list.stream()
+                        .filter(item -> item instanceof Map<?, ?> row && "DONE".equals(row.get("status"))).count() : 0;
+                brief.put("pendingCount", t.get("pendingCount"));
+                brief.put("doneCount", done);
                 brief.put("hasDiagnosis", t.get("diagnosisCompleted"));
             }
             case "my_recommend" -> {

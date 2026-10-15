@@ -1,13 +1,9 @@
 package com.kgquiz.quiz.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.kgquiz.quiz.auth.UserContext;
-import com.kgquiz.quiz.common.BizException;
 import com.kgquiz.quiz.entity.GraphNode;
 import com.kgquiz.quiz.entity.LearningRecord;
-import com.kgquiz.quiz.entity.StudentGraph;
 import com.kgquiz.quiz.mapper.LearningRecordMapper;
-import com.kgquiz.quiz.mapper.StudentGraphMapper;
 import com.kgquiz.quiz.service.neo4j.GraphStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,9 +38,8 @@ import java.util.Set;
 public class LearningRecordService {
 
     private final LearningRecordMapper learningRecordMapper;
-    private final StudentGraphMapper studentGraphMapper;
     private final GraphStore graphStore;
-    private final MasteryService masteryService;
+    private final StudentAccessService studentAccessService;
 
     // ==================== 写入 ====================
 
@@ -156,7 +151,11 @@ public class LearningRecordService {
 
     /** 学习时间线（按时间倒序），支持按动作类型与知识点过滤 */
     public List<Map<String, Object>> timeline(Long studentId, String action, Long nodeId, Integer limit) {
-        UserContext.checkStudentScope(studentId);
+        return timeline(studentId, action, nodeId, limit, null);
+    }
+
+    public List<Map<String, Object>> timeline(Long studentId, String action, Long nodeId, Integer limit, Integer days) {
+        studentAccessService.requireStudent(studentId);
         LambdaQueryWrapper<LearningRecord> w = new LambdaQueryWrapper<LearningRecord>()
                 .eq(LearningRecord::getStudentId, studentId)
                 .orderByDesc(LearningRecord::getCreatedAt)
@@ -168,7 +167,11 @@ public class LearningRecordService {
         if (nodeId != null) {
             w.eq(LearningRecord::getNodeId, nodeId);
         }
-        return learningRecordMapper.selectList(w).stream().map(this::toView).toList();
+        if (days != null) {
+            int window = Math.max(1, Math.min(365, days));
+            w.ge(LearningRecord::getCreatedAt, LocalDate.now().minusDays(window - 1).atStartOfDay());
+        }
+        return toViews(learningRecordMapper.selectList(w));
     }
 
     /**
@@ -178,7 +181,16 @@ public class LearningRecordService {
      * 比一个孤零零的掌握度数字有用得多。</p>
      */
     public Map<String, Object> nodeTimeline(Long studentId, Long nodeId) {
-        UserContext.checkStudentScope(studentId);
+        var student = studentAccessService.requireStudent(studentId);
+        if (nodeId != null) {
+            var targetNode = graphStore.findNode(nodeId);
+            if (targetNode != null) {
+                var graph = graphStore.findGraph(targetNode.getGraphId());
+                if (graph == null || !java.util.Objects.equals(student.getOrgId(), graph.getOrgId())) {
+                    throw new com.kgquiz.quiz.common.ForbiddenException("只能查看本机构的知识点轨迹");
+                }
+            }
+        }
         List<LearningRecord> records = learningRecordMapper.selectList(
                 new LambdaQueryWrapper<LearningRecord>()
                         .eq(LearningRecord::getStudentId, studentId)
@@ -190,7 +202,7 @@ public class LearningRecordService {
         out.put("nodeId", nodeId);
         out.put("nodeName", node == null ? null : node.getName());
         out.put("nodeDescription", node == null ? null : node.getDescription());
-        out.put("records", records.stream().map(this::toView).toList());
+        out.put("records", toViews(records));
         out.put("eventCount", records.size());
         return out;
     }
@@ -202,9 +214,9 @@ public class LearningRecordService {
      * 「最近 7 天学了 5 个知识点、正确率 62%」才是学生明天能据此行动的信息。</p>
      */
     public Map<String, Object> stats(Long studentId, Integer days) {
-        UserContext.checkStudentScope(studentId);
+        studentAccessService.requireStudent(studentId);
         int window = Math.max(1, Math.min(365, days == null ? 7 : days));
-        LocalDateTime since = LocalDateTime.now().minusDays(window);
+        LocalDateTime since = LocalDate.now().minusDays(window - 1).atStartOfDay();
 
         List<LearningRecord> all = learningRecordMapper.selectList(
                 new LambdaQueryWrapper<LearningRecord>()
@@ -228,9 +240,11 @@ public class LearningRecordService {
             if (r.getNodeId() != null) {
                 nodeIds.add(r.getNodeId());
             }
-            if (r.getScoreRate() != null) {
-                rateSum += r.getScoreRate().doubleValue();
-                rateCount++;
+            // 按题量加权；改分记录与任务汇总不重复计入做题正确率。
+            if (r.getScoreRate() != null && nz(r.getQuestionCount()) > 0
+                    && !LearningRecord.A_ADJUST.equals(r.getAction())) {
+                rateSum += r.getScoreRate().doubleValue() * r.getQuestionCount();
+                rateCount += r.getQuestionCount();
             }
             duration += nz(r.getDurationSec());
             questions += nz(r.getQuestionCount());
@@ -259,7 +273,7 @@ public class LearningRecordService {
         out.put("byAction", byAction);
         out.put("dailyTrend", trend);
         out.put("actionDetail", actionDetail());
-        out.put("records", all.stream().map(this::toView).toList());
+        out.put("records", toViews(all));
         return out;
     }
 
@@ -270,13 +284,17 @@ public class LearningRecordService {
      * 又被排在第一。</p>
      */
     public Map<Long, LocalDateTime> recentNodeActivity(Long studentId, int withinDays) {
+        if (withinDays <= 0) {
+            return Map.of();
+        }
         int window = Math.max(1, withinDays);
         LocalDateTime since = LocalDateTime.now().minusDays(window);
         List<LearningRecord> records = learningRecordMapper.selectList(
                 new LambdaQueryWrapper<LearningRecord>()
                         .eq(LearningRecord::getStudentId, studentId)
                         .ge(LearningRecord::getCreatedAt, since)
-                        .eq(LearningRecord::getNodeId, 1));
+                        .isNotNull(LearningRecord::getNodeId)
+                        .ne(LearningRecord::getAction, LearningRecord.A_ADJUST));
         Map<Long, LocalDateTime> out = new LinkedHashMap<>();
         for (LearningRecord r : records) {
             if (r.getNodeId() == null || r.getCreatedAt() == null) {
@@ -314,7 +332,6 @@ public class LearningRecordService {
         m.put("id", r.getId());
         m.put("studentId", r.getStudentId());
         m.put("nodeId", r.getNodeId());
-        m.put("nodeName", r.getNodeId() == null ? null : nodeName(r.getNodeId()));
         m.put("action", r.getAction());
         m.put("refType", r.getRefType());
         m.put("refId", r.getRefId());
@@ -329,6 +346,19 @@ public class LearningRecordService {
         return m;
     }
 
+    private List<Map<String, Object>> toViews(List<LearningRecord> records) {
+        Map<Long, String> names = new LinkedHashMap<>();
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (LearningRecord record : records) {
+            Long nodeId = record.getNodeId();
+            if (nodeId != null && !names.containsKey(nodeId)) names.put(nodeId, nodeName(nodeId));
+            Map<String, Object> view = toView(record);
+            view.put("nodeName", names.get(nodeId));
+            out.add(view);
+        }
+        return out;
+    }
+
     private String nodeName(Long nodeId) {
         GraphNode n = graphStore.findNode(nodeId);
         return n == null ? null : n.getName();
@@ -336,27 +366,9 @@ public class LearningRecordService {
 
     // ==================== 工具 ====================
 
-    /** 学生所在机构；用于给记录打租户标记。取不到不阻断写入（记录本身可查） */
+    /** 记录归属以学生档案为准，批量导入后尚无图谱也可记流水。 */
     private Long orgIdOf(Long studentId) {
-        StudentGraph sg = studentGraphMapper.selectOne(new LambdaQueryWrapper<StudentGraph>()
-                .eq(StudentGraph::getStudentId, studentId)
-                .orderByDesc(StudentGraph::getId)
-                .last("limit 1"));
-        if (sg != null) {
-            var graph = graphStore.findGraph(sg.getSourceGraphId());
-            if (graph != null && graph.getOrgId() != null) {
-                return graph.getOrgId();
-            }
-        }
-        // 退而求其次：取该生已有记录里的机构，再退到学生实体
-        LearningRecord any = learningRecordMapper.selectOne(new LambdaQueryWrapper<LearningRecord>()
-                .eq(LearningRecord::getStudentId, studentId)
-                .orderByDesc(LearningRecord::getId)
-                .last("limit 1"));
-        if (any != null && any.getOrgId() != null) {
-            return any.getOrgId();
-        }
-        throw new BizException("无法确定学生所属机构，未写入学习记录");
+        return studentAccessService.requireStudent(studentId).getOrgId();
     }
 
     private static int nz(Integer v) {

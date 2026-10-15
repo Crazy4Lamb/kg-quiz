@@ -73,6 +73,7 @@ public class DiagnosisService {
     private final StudentNodeStateMapper studentNodeStateMapper;
     private final GraphStore graphStore;
     private final RecommendService recommendService;
+    private final StudentAccessService studentAccessService;
 
     // ==================== 生成诊断卷 ====================
 
@@ -391,12 +392,7 @@ public class DiagnosisService {
     }
 
     private Student requireStudent(Long studentId) {
-        Student student = studentMapper.selectById(studentId);
-        if (student == null) {
-            throw new BizException("学生不存在: " + studentId);
-        }
-        UserContext.checkOrgScope(student.getOrgId());
-        return student;
+        return studentAccessService.requireStudent(studentId);
     }
 
     private String writeJson(Object value) {

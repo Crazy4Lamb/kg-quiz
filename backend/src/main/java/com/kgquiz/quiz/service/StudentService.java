@@ -38,6 +38,8 @@ public class StudentService {
     private final ClazzMapper clazzMapper;
     private final GraphStore graphStore;
     private final AuthService authService;
+    private final StudentAccessService studentAccessService;
+    private final LearningRecordService learningRecordService;
 
     /** 学生列表（含各自复制的图谱信息与登录账号）；按当前账号的机构范围过滤 */
     public List<Map<String, Object>> list() {
@@ -46,6 +48,17 @@ public class StudentService {
         Long scope = UserContext.scopeOrgId();
         if (scope != null) {
             wrapper.eq(Student::getOrgId, scope);
+        }
+        Long campus = UserContext.scopeCampusId();
+        if (campus != null) {
+            wrapper.eq(Student::getCampusId, campus);
+        }
+        var current = UserContext.require();
+        if (current.role() == com.kgquiz.quiz.auth.UserRole.TEACHER) {
+            if (current.clazzIds().isEmpty()) {
+                return List.of();
+            }
+            wrapper.in(Student::getClazzId, current.clazzIds());
         }
         List<Student> students = studentMapper.selectList(wrapper);
         List<Map<String, Object>> result = new ArrayList<>();
@@ -222,8 +235,15 @@ public class StudentService {
         if (sg == null) {
             throw new BizException("该学生尚未复制图谱");
         }
-        if (graphStore.findNode(nodeId) == null) {
+        GraphNode node = graphStore.findNode(nodeId);
+        if (node == null) {
             throw new BizException("知识点不存在: " + nodeId);
+        }
+        if (!sg.getSourceGraphId().equals(node.getGraphId())) {
+            throw new ForbiddenException("只能调整学生当前图谱中的知识点");
+        }
+        if (mastery == null || mastery.signum() < 0 || mastery.compareTo(java.math.BigDecimal.ONE) > 0) {
+            throw new BizException("掌握度必须在 0 到 1 范围内");
         }
         StudentNodeState state = studentNodeStateMapper.selectOne(new LambdaQueryWrapper<StudentNodeState>()
                 .eq(StudentNodeState::getStudentGraphId, sg.getId())
@@ -236,11 +256,28 @@ public class StudentService {
             state.setSourceNodeId(nodeId);
         }
         state.setMastery(mastery.setScale(4, java.math.RoundingMode.HALF_UP));
+        if (mastery.signum() == 0) {
+            state.setPracticeCount(0);
+            state.setLastPracticedAt(null);
+            state.setLastScoreRate(null);
+            state.setMasteryPeak(java.math.BigDecimal.ZERO);
+        } else {
+            // 人工确认可作为最低限度的一次观测，不反复增加练习次数。
+            state.setPracticeCount(Math.max(1, state.getPracticeCount() == null ? 0 : state.getPracticeCount()));
+            if (state.getLastPracticedAt() == null) state.setLastPracticedAt(java.time.LocalDateTime.now());
+            state.setLastScoreRate(state.getMastery());
+            java.math.BigDecimal peak = state.getMasteryPeak() == null ? java.math.BigDecimal.ZERO : state.getMasteryPeak();
+            state.setMasteryPeak(peak.max(state.getMastery()));
+        }
         if (state.getId() == null) {
             studentNodeStateMapper.insert(state);
         } else {
             studentNodeStateMapper.updateById(state);
         }
+        learningRecordService.record(studentId, nodeId, com.kgquiz.quiz.entity.LearningRecord.A_ADJUST,
+                "NODE", nodeId, null, null, null, 0,
+                new MasteryService.MasteryChange(nodeId, old.doubleValue(), state.getMastery().doubleValue(), state.getPracticeCount()),
+                mastery.signum() == 0 ? "教师重置知识点掌握状态" : "教师人工确认掌握度");
         Map<String, Object> result = new HashMap<>();
         result.put("studentId", studentId);
         result.put("nodeId", nodeId);
@@ -266,16 +303,7 @@ public class StudentService {
 
     /** 取学生并校验机构归属：跨机构一律 403 */
     public Student requireStudent(Long studentId) {
-        Student student = studentMapper.selectById(studentId);
-        if (student == null) {
-            throw new BizException("学生不存在: " + studentId);
-        }
-        if (student.getOrgId() != null) {
-            UserContext.checkOrgScope(student.getOrgId());
-        } else if (!UserContext.peek().isAdmin()) {
-            throw new ForbiddenException("该学生未归属机构，请联系平台管理员");
-        }
-        return student;
+        return studentAccessService.requireStudent(studentId);
     }
 
     private StudentGraph latestStudentGraph(Long studentId) {

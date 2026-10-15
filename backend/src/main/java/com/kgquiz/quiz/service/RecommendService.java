@@ -65,6 +65,7 @@ public class RecommendService {
     private final GraphStore graphStore;
     private final MasteryProfileService masteryProfileService;
     private final LearningRecordService learningRecordService;
+    private final StudentAccessService studentAccessService;
 
     // ==================== 策略 ====================
 
@@ -182,7 +183,7 @@ public class RecommendService {
 
     /** 参数元数据：前端配置面板靠它动态渲染，不在前端硬编码字段列表 */
     private static final List<Map<String, Object>> PARAM_GROUPS = List.of(
-            paramGroup("weight", "打分权重", "决定「多想要」这一类知识点。调这组会同时影响学习推荐与出题顺序", List.of(
+            paramGroup("weight", "打分权重", "掌握缺口与重要性影响推荐及出题；遗忘、置信度与重复因子用于学习推荐", List.of(
                     param("masteryWeight", "掌握缺口权重", 0, 1, 0.05,
                             "分数 = 缺口 × 该权重 + …。越大越偏向「先补最不熟的」"),
                     param("importanceWeight", "知识点重要性权重", 0, 1, 0.05,
@@ -205,11 +206,11 @@ public class RecommendService {
                             "掌握度减半所需的天数。7 天适合临考冲刺，21 天适合长期学习"),
                     param("decayFloorRatio", "衰减下限系数", 0, 1, 0.05,
                             "衰减不会低于「历史峰值 × 该系数」，防止长期不练的知识点永久被判薄弱"),
-                    param("confidenceFullPractice", "置信度达标练习次数", 1, 20, 1,
-                            "练够这么多次，置信度才接近高。置信度 = 次数 /(次数 + 该值)")
+                    param("confidenceFullPractice", "置信度平滑系数（次）", 1, 20, 1,
+                            "置信度 = 次数 /(次数 + 该值)。练习次数等于该系数时置信度为 50%")
             )),
             paramGroup("orchestration", "推荐编排", "决定推多少、怎么分配名额", List.of(
-                    param("dailyTaskLimit", "每日知识点条数", 1, 20, 1, "一次推多少个知识点（每个会生成学+练两条任务）"),
+                    param("dailyTaskLimit", "每日知识点条数", 1, 20, 1, "一次最多推荐多少个知识点，按学习、练习或复习建议生成任务"),
                     param("weakQuotaRatio", "薄弱保底占比", 0, 1, 0.05, "至少这么比例的名额留给薄弱知识点，防止全是复习"),
                     param("reviewQuotaRatio", "复习配额占比", 0, 0.5, 0.05, "留给已掌握知识点的复习名额，防遗忘"),
                     param("recentRepeatWindowDays", "近期重复窗口（天）", 0, 30, 1, "窗口期内学过的知识点会被扣分"),
@@ -365,6 +366,9 @@ public class RecommendService {
     public List<Map<String, Object>> listRules(Long orgId) {
         LambdaQueryWrapper<RecommendRule> w = new LambdaQueryWrapper<RecommendRule>()
                 .orderByAsc(RecommendRule::getId);
+        if (orgId != null) {
+            UserContext.checkOrgScope(orgId);
+        }
         Long scope = orgId != null ? orgId : UserContext.scopeOrgId();
         if (scope != null) {
             w.and(q -> q.eq(RecommendRule::getOrgId, scope).or().isNull(RecommendRule::getOrgId));
@@ -380,11 +384,14 @@ public class RecommendService {
     @Transactional
     public Map<String, Object> saveRule(Long id, Long orgId, String name, String strategy,
                                         Map<String, Object> config, Boolean enabled, Boolean isDefault) {
+        if (orgId != null) {
+            UserContext.checkOrgScope(orgId);
+        }
         Long scope = orgId != null ? orgId : UserContext.scopeOrgId();
         Strategy st = Strategy.parse(strategy);
         Config parsed = config == null || config.isEmpty()
                 ? Config.preset(st)
-                : parseMap(config, Config.preset(st));
+                : sanitize(config, st);
         String json;
         try {
             json = MAPPER.writeValueAsString(parsed.toMap());
@@ -397,6 +404,8 @@ public class RecommendService {
             if (rule == null) {
                 throw new BizException("规则不存在: " + id);
             }
+            // 以数据库归属校验更新，不能信任请求里的 orgId。
+            UserContext.checkOrgScope(rule.getOrgId());
         } else {
             rule = new RecommendRule();
             rule.setOrgId(scope);
@@ -509,16 +518,13 @@ public class RecommendService {
      * 而不用真的改线上配置。</p>
      */
     public List<Recommendation> recommendWith(Long studentId, Integer limit, Config override, Strategy overrideStrategy) {
+        var student = studentAccessService.requireStudent(studentId);
         StudentGraph sg = latestStudentGraph(studentId);
         if (sg == null) {
             throw new BizException("该学生尚未复制图谱，无法推荐学习内容");
         }
         Long graphId = sg.getSourceGraphId();
-        Long orgId = null;
-        var graph = graphStore.findGraph(graphId);
-        if (graph != null) {
-            orgId = graph.getOrgId();
-        }
+        Long orgId = student.getOrgId();
         Config cfg = override != null ? override : configOf(orgId);
         Strategy strategy = overrideStrategy != null ? overrideStrategy : strategyOf(orgId);
 
@@ -548,8 +554,53 @@ public class RecommendService {
         scored.sort(cmp);
 
         // ---------- 阶段三：配额与多样性裁剪 ----------
-        int max = limit != null && limit > 0 ? limit : cfg.dailyTaskLimit();
-        return quota(scored, cfg, max);
+        int max = Math.min(100, limit != null && limit > 0 ? limit : cfg.dailyTaskLimit());
+        List<Recommendation> selected = quota(scored, cfg, max);
+        return strategy == Strategy.SEQUENTIAL
+                ? includePrerequisites(selected, scored, topology.prereqOf(), profiles, cfg.solidThreshold(), max)
+                : selected;
+    }
+
+    /** 顺序推进时，未掌握的前置优先于后继；条数有限时先补基础。 */
+    List<Recommendation> includePrerequisites(List<Recommendation> selected, List<Recommendation> all,
+                                               Map<Long, List<Long>> prerequisites,
+                                               Map<Long, MasteryProfileService.Profile> profiles,
+                                               double solidThreshold, int max) {
+        Map<Long, Recommendation> byId = new LinkedHashMap<>();
+        all.forEach(r -> byId.put(r.nodeId(), r));
+        Map<Long, Recommendation> ordered = new LinkedHashMap<>();
+        Set<Long> visiting = new HashSet<>();
+        for (Recommendation r : selected) {
+            appendPrerequisites(r.nodeId(), byId, prerequisites, profiles, solidThreshold, max, ordered, visiting);
+        }
+        return List.copyOf(ordered.values());
+    }
+
+    private void appendPrerequisites(Long id, Map<Long, Recommendation> byId, Map<Long, List<Long>> prerequisites,
+                                      Map<Long, MasteryProfileService.Profile> profiles, double solidThreshold,
+                                      int max, Map<Long, Recommendation> ordered, Set<Long> visiting) {
+        record Visit(Long nodeId, boolean expanded) {}
+        var pending = new java.util.ArrayDeque<Visit>();
+        pending.push(new Visit(id, false));
+        while (!pending.isEmpty() && ordered.size() < max) {
+            Visit visit = pending.pop();
+            Long nodeId = visit.nodeId();
+            if (ordered.containsKey(nodeId) || !byId.containsKey(nodeId)) continue;
+            if (visit.expanded()) {
+                visiting.remove(nodeId);
+                ordered.put(nodeId, byId.get(nodeId));
+                continue;
+            }
+            if (!visiting.add(nodeId)) continue;
+            pending.push(new Visit(nodeId, true));
+            var parents = prerequisites.getOrDefault(nodeId, List.of());
+            for (int i = parents.size() - 1; i >= 0; i--) {
+                Long parent = parents.get(i);
+                var profile = profiles.get(parent);
+                if (profile == null || profile.decayed() < solidThreshold) pending.push(new Visit(parent, false));
+            }
+        }
+        visiting.clear();
     }
 
     /** 图谱拓扑：前置关系 + 父节点，用于前置阻塞因子与同父去重 */
@@ -664,13 +715,13 @@ public class RecommendService {
             reasons.add("最近 " + repeatDays + " 天内刚学过，先放一放");
         }
 
-        String tier = tierOf(effective, cfg);
+        String tier = count == 0 ? "UNSEEN" : tierOf(effective, cfg);
         String action = suggestAction(tier, count, confidence, repeatDays >= 0);
         double finalScore = rawScore - repeatPenalty;
 
         return new Recommendation(node.getId(), node.getName(), node.getDescription(),
                 topology.parentOf().get(node.getId()),
-                BigDecimal.valueOf(effective).setScale(4, java.math.RoundingMode.HALF_UP),
+                BigDecimal.valueOf(p == null ? 0 : p.raw()).setScale(4, java.math.RoundingMode.HALF_UP),
                 effective, count, confidence, daysSince, level, levelLabel,
                 node.getWeight(), tier, finalScore, rawScore, factors, reasons, action);
     }
@@ -687,6 +738,9 @@ public class RecommendService {
 
     /** 建议动作：告诉前端该生成「学」「练」还是「复习」任务 */
     private String suggestAction(String tier, int count, double confidence, boolean recentlyPracticed) {
+        if (tier.equals("UNSEEN")) {
+            return "LEARN";
+        }
         if (tier.equals("WEAK")) {
             return count == 0 ? "LEARN" : "PRACTICE";
         }
@@ -760,81 +814,46 @@ public class RecommendService {
      * <p>约束冲突时的优先级：先满足保底，再满足去重，最后受复习配额压。
      * 宁可稍微超出配额，也不要让薄弱项被复习挤掉。</p>
      */
-    private List<Recommendation> quota(List<Recommendation> sorted, Config cfg, int max) {
+    List<Recommendation> quota(List<Recommendation> sorted, Config cfg, int max) {
         if (sorted.isEmpty() || max <= 0) {
             return List.of();
         }
-        int weakFloor = (int) Math.round(max * cfg.weakQuotaRatio());
-        int reviewCap = (int) Math.round(max * cfg.reviewQuotaRatio());
-        int maxPerParent = Math.max(1, cfg.maxPerParent());
-
-        List<Recommendation> out = new ArrayList<>();
+        int weakFloor = (int) Math.ceil(max * cfg.weakQuotaRatio());
+        int reviewCap = (int) Math.floor(max * cfg.reviewQuotaRatio());
+        Set<Long> selected = new LinkedHashSet<>();
         Map<Long, Integer> perParent = new HashMap<>();
-        List<Recommendation> deferred = new ArrayList<>();
 
-        // 第一轮：按分数取，同时满足薄弱保底与同父去重
-        int weakTaken = 0;
+        // 先预留薄弱/未接触名额。优先章节多样性，保底不足时允许同章补弱。
+        for (boolean enforceParent : List.of(true, false)) {
+            for (Recommendation r : sorted) {
+                if (selected.size() >= Math.min(max, weakFloor)) break;
+                if (!"WEAK".equals(r.tier()) && !"UNSEEN".equals(r.tier())) continue;
+                if (selected.contains(r.nodeId())) continue;
+                Long parent = r.parentNodeId();
+                if (enforceParent && parent != null
+                        && perParent.getOrDefault(parent, 0) >= cfg.maxPerParent()) continue;
+                selected.add(r.nodeId());
+                if (parent != null) perParent.merge(parent, 1, Integer::sum);
+            }
+        }
+        // 首先遵守配额；候选不足时依次放宽章节限制、复习上限。
         int reviewTaken = 0;
-        for (Recommendation r : sorted) {
-            if (out.size() >= max) {
-                break;
-            }
-            boolean isWeak = "WEAK".equals(r.tier());
-            boolean isReview = "SOLID".equals(r.tier());
-            if (isReview && reviewTaken >= reviewCap && weakTaken >= weakFloor) {
-                // 复习名额已满且薄弱保底已达成：这个先跳过，后面还有薄弱项要留位置
-                deferred.add(r);
-                continue;
-            }
-            Long parent = parentKeyOf(r);
-            int used = parent == null ? 0 : perParent.getOrDefault(parent, 0);
-            if (parent != null && used >= maxPerParent) {
-                deferred.add(r);
-                continue;
-            }
-            out.add(r);
-            if (parent != null) {
-                perParent.merge(parent, 1, Integer::sum);
-            }
-            if (isWeak) {
-                weakTaken++;
-            }
-            if (isReview) {
-                reviewTaken++;
+        for (int pass = 0; pass < 3 && selected.size() < max; pass++) {
+            for (Recommendation r : sorted) {
+                if (selected.size() >= max) break;
+                if (selected.contains(r.nodeId())) continue;
+                boolean review = "SOLID".equals(r.tier());
+                if (pass < 2 && review && reviewTaken >= reviewCap) continue;
+                Long parent = r.parentNodeId();
+                if (pass == 0 && parent != null
+                        && perParent.getOrDefault(parent, 0) >= cfg.maxPerParent()) continue;
+                selected.add(r.nodeId());
+                if (parent != null) perParent.merge(parent, 1, Integer::sum);
+                if (review) reviewTaken++;
             }
         }
-
-        // 第二轮：薄弱保底没达成时，从延后项里把最弱的提上来（可突破同父去重）
-        if (weakTaken < weakFloor) {
-            List<Recommendation> weakLeft = deferred.stream()
-                    .filter(r -> "WEAK".equals(r.tier()))
-                    .sorted(Comparator.comparingDouble(Recommendation::score).reversed())
-                    .toList();
-            for (Recommendation r : weakLeft) {
-                if (out.size() >= max || weakTaken >= weakFloor) {
-                    break;
-                }
-                if (out.contains(r)) {
-                    continue;
-                }
-                out.add(r);
-                weakTaken++;
-            }
-        }
-
-        // 第三轮：位置还有空就按分数补齐（此时不再限复习配额）
-        for (Recommendation r : deferred) {
-            if (out.size() >= max) {
-                break;
-            }
-            if (!out.contains(r)) {
-                out.add(r);
-            }
-        }
-
-        return out.stream()
-                .sorted(Comparator.comparingDouble(Recommendation::score).reversed())
-                .toList();
+        // 裁剪只选成员，保留策略顺序，不能再次按总分重排。
+        return sorted.stream().filter(r -> selected.contains(r.nodeId())).toList();
     }
 
     /** 同父去重的键：优先用所属父节点；没有父节点则返回 null（等价于不限流） */
@@ -857,7 +876,7 @@ public class RecommendService {
         }
         try {
             Map<String, Object> raw = MAPPER.readValue(json, Map.class);
-            return parseMap(raw, Config.defaults());
+            return sanitize(raw, Strategy.BALANCED);
         } catch (Exception e) {
             log.warn("推荐规则解析失败，回退默认值: {}", e.getMessage());
             return Config.defaults();
@@ -891,7 +910,22 @@ public class RecommendService {
 
     /** 把草稿配置裁到合法区间，防止前端传进来 5 层的权重把打分算爆 */
     public Config sanitize(Map<String, Object> config, Strategy strategy) {
-        return parseMap(config, Config.preset(strategy));
+        Config c = parseMap(config, Config.preset(strategy));
+        double weak = bounded(c.weakThreshold(), 0, 0.95, 0.4);
+        return new Config(
+                bounded(c.masteryWeight(), 0, 1, 0.7), bounded(c.importanceWeight(), 0, 1, 0.3),
+                weak, bounded(c.solidThreshold(), weak + 0.01, 1, Math.max(0.7, weak + 0.01)),
+                bounded(c.prereqBoost(), 0, 1, 0.15), bounded(c.consolidateRatio(), 0, 0.5, 0.2),
+                Math.max(1, Math.min(20, c.dailyTaskLimit())),
+                bounded(c.forgettingWeight(), 0, 1, 0.2), bounded(c.uncertaintyWeight(), 0, 1, 0.1),
+                bounded(c.repetitionPenalty(), 0, 1, 0.15), bounded(c.forgettingHalfLifeDays(), 1, 60, 14),
+                bounded(c.decayFloorRatio(), 0, 1, 0.6), Math.max(1, Math.min(20, c.confidenceFullPractice())),
+                bounded(c.weakQuotaRatio(), 0, 1, 0.6), bounded(c.reviewQuotaRatio(), 0, 0.5, 0.2),
+                Math.max(0, Math.min(30, c.recentRepeatWindowDays())), Math.max(1, Math.min(10, c.maxPerParent())));
+    }
+
+    private static double bounded(double value, double min, double max, double fallback) {
+        return Double.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
     }
 
     private static double num(Map<String, Object> map, String key, double def) {
@@ -900,7 +934,8 @@ public class RecommendService {
             return def;
         }
         try {
-            return Double.parseDouble(String.valueOf(v));
+            double parsed = Double.parseDouble(String.valueOf(v));
+            return Double.isFinite(parsed) ? parsed : def;
         } catch (NumberFormatException e) {
             return def;
         }

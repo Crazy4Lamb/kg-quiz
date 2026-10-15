@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card, Table, Button, Space, Tag, Typography, message, Modal, Form, Input,
   Switch, Popconfirm, Alert, Row, Col, List, Select, Divider, Tooltip, Slider
@@ -36,6 +36,7 @@ export default function RecommendRules() {
   const [simStudent, setSimStudent] = useState(null);
   const [sim, setSim] = useState(null);
   const [simulating, setSimulating] = useState(false);
+  const simulationVersion = useRef(0);
 
   // 规则编辑弹窗
   const [open, setOpen] = useState(false);
@@ -52,16 +53,14 @@ export default function RecommendRules() {
       setMeta(metaData);
       setRules(ruleList);
       // 生效规则：优先本机构默认，否则平台默认
-      const eff = ruleList.find((r) => r.isDefault === 1 && r.orgId != null)
-        || ruleList.find((r) => r.isDefault === 1) || null;
+      const ownOrg = session?.user?.orgId;
+      const eff = ruleList.find((r) => r.enabled === 1 && r.isDefault === 1 && r.orgId === ownOrg)
+        || ruleList.find((r) => r.enabled === 1 && r.isDefault === 1 && r.orgId == null) || null;
       setActiveRule(eff);
       // 草稿初始化为生效规则（没有则取默认元数据）
       const initStrategy = eff?.strategy || 'BALANCED';
       const initConfig = eff?.configMap || metaData?.defaults || {};
       setDraft({ strategy: initStrategy, config: { ...initConfig } });
-      if (!simStudent && ruleList.length >= 0) {
-        // 学生列表稍后加载，这里先不依赖
-      }
     } catch (e) {
       message.error(e.message);
     } finally {
@@ -80,14 +79,23 @@ export default function RecommendRules() {
   };
 
   useEffect(() => { load(); loadStudents(); }, []);
+  useEffect(() => {
+    simulationVersion.current += 1;
+    setSim(null);
+    const org = students.find((s) => s.id === simStudent)?.orgId ?? session?.user?.orgId;
+    setActiveRule(rules.find((r) => r.enabled === 1 && r.isDefault === 1 && r.orgId === org)
+      || rules.find((r) => r.enabled === 1 && r.isDefault === 1 && r.orgId == null) || null);
+  }, [simStudent, students, rules]);
 
   const pickStrategy = (value) => {
+    simulationVersion.current += 1;
     const preset = meta?.strategies?.find((s) => s.value === value)?.preset;
     setDraft((d) => ({ strategy: value, config: preset ? { ...preset } : d.config }));
     setSim(null);
   };
 
   const setParam = (key, val) => {
+    simulationVersion.current += 1;
     setDraft((d) => ({ ...d, config: { ...d.config, [key]: val } }));
     setSim(null);
   };
@@ -95,6 +103,7 @@ export default function RecommendRules() {
   const doSimulate = async () => {
     if (!simStudent) { message.warning('请先选择一名学生'); return; }
     setSimulating(true);
+    const version = ++simulationVersion.current;
     try {
       const r = unwrap(await api.simulateRecommend({
         studentId: simStudent,
@@ -102,7 +111,7 @@ export default function RecommendRules() {
         config: draft.config,
         limit: 12
       }));
-      setSim(r);
+      if (version === simulationVersion.current) setSim(r);
     } catch (e) {
       message.error(e.message);
     } finally {
@@ -125,6 +134,7 @@ export default function RecommendRules() {
   }, [draft, activeRule]);
 
   const openEditor = (rule) => {
+    if (rule) setDraft({ strategy: rule.strategy, config: { ...rule.configMap } });
     setEditing(rule || null);
     setOpen(true);
   };
@@ -137,31 +147,37 @@ export default function RecommendRules() {
         isDefault: editing.isDefault === 1, strategy: editing.strategy, ...(editing.configMap || {})
       };
     }
-    const preset = meta?.strategies?.find((s) => s.value === 'BALANCED')?.preset || meta?.defaults || {};
-    return { name: '自定义规则', enabled: true, isDefault: false, strategy: 'BALANCED', ...preset };
+    return { name: '自定义规则', enabled: true, isDefault: false, strategy: draft.strategy };
   })();
 
+  useEffect(() => {
+    if (open) {
+      form.resetFields();
+      form.setFieldsValue(editing ? {
+        name: editing.name, enabled: editing.enabled === 1,
+        isDefault: editing.isDefault === 1, strategy: editing.strategy
+      } : { name: '自定义规则', enabled: true, isDefault: false, strategy: draft.strategy });
+    }
+  }, [open, editing, form]);
+
   const saveRule = async () => {
-    const v = await form.validateFields();
     setBusy(true);
     try {
+      const v = await form.validateFields();
       await api.saveRecommendRule({
-        id: v.id ?? null,
-        orgId: null, // 后端按当前用户机构落库；平台管理员落 null
+        id: editing?.id ?? null,
+        orgId: editing?.orgId ?? null,
         name: v.name,
         strategy: v.strategy,
         enabled: !!v.enabled,
         isDefault: !!v.isDefault,
-        config: meta?.groups?.reduce((acc, g) => {
-          g.params.forEach((p) => { acc[p.key] = v[p.key] ?? draft.config[p.key]; });
-          return acc;
-        }, {}) || draft.config
+        config: draft.config
       });
       message.success('规则已保存');
       setOpen(false);
       await load();
     } catch (e) {
-      message.error(e.message);
+      if (!e.errorFields) message.error(e.message);
     } finally {
       setBusy(false);
     }
@@ -208,9 +224,12 @@ export default function RecommendRules() {
       title: '操作', width: 230,
       render: (_, row) => (
         <Space size={4}>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditor(row)}>编辑</Button>
+          <Button size="small" icon={<EditOutlined />}
+            disabled={!canSave || (role !== ROLE.ADMIN && row.orgId !== session?.user?.orgId)}
+            onClick={() => openEditor(row)}>编辑</Button>
           <Popconfirm title="确认删除该规则？" onConfirm={() => remove(row)}>
-            <Button size="small" danger icon={<DeleteOutlined />} />
+            <Button size="small" danger icon={<DeleteOutlined />} aria-label="删除规则"
+              disabled={!canSave || (role !== ROLE.ADMIN && row.orgId !== session?.user?.orgId)} />
           </Popconfirm>
         </Space>
       )
@@ -223,7 +242,7 @@ export default function RecommendRules() {
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <Alert type="info" showIcon icon={<SlidersOutlined />}
         message="推荐同时决定「学什么」（每日学习任务）与「练什么」（自适应出题）"
-        description="六类因子（掌握缺口 / 重要性 / 遗忘风险 / 低置信度 / 前置阻塞 / 近期重复）加权打分。改这里，两边一起变。教师可查看并沙盒模拟，落库保存需机构/平台管理员。" />
+        description="沙盒展示学习推荐的六因子结果。掌握缺口、重要性等共有参数也用于出题；遗忘、置信度和重复惩罚用于学习推荐。教师可模拟，保存需机构或平台管理员。" />
 
       {/* 策略 + 参数编辑器 */}
       <Card size="small" title={<Space><SlidersOutlined />推荐策略与参数</Space>}
@@ -238,17 +257,17 @@ export default function RecommendRules() {
           </Space>
         }>
         <div style={{ marginBottom: 8 }}>
-          <Typography.Text strong>① 选择策略（决定因子组合方式）</Typography.Text>
+          <Typography.Text strong>① 选择策略与预设权重</Typography.Text>
         </div>
         <Row gutter={12} style={{ marginBottom: 16 }}>
           {(meta?.strategies || []).map((s) => {
             const selected = draft.strategy === s.value;
             return (
-              <Col span={6} key={s.value}>
+              <Col xs={12} xl={6} key={s.value}>
                 <Card size="small" hoverable onClick={() => pickStrategy(s.value)}
-                  style={{ borderColor: selected ? '#1677ff' : '#f0f0f0', borderWidth: selected ? 2 : 1 }}>
-                  <div style={{ fontWeight: 600, color: selected ? '#1677ff' : undefined }}>{s.label}</div>
-                  <div style={{ fontSize: 12, color: '#888', minHeight: 34 }}>{s.desc}</div>
+                  style={{ borderColor: selected ? 'var(--color-primary)' : 'var(--color-border)', borderWidth: selected ? 2 : 1 }}>
+                  <div style={{ fontWeight: 600, color: selected ? 'var(--color-primary)' : undefined }}>{s.label}</div>
+                  <div style={{ fontSize: 12, color: 'var(--color-muted)', minHeight: 34 }}>{s.desc}</div>
                   {selected && <Tag color="blue">当前草稿</Tag>}
                 </Card>
               </Col>
@@ -274,7 +293,7 @@ export default function RecommendRules() {
             </div>
             <Row gutter={[24, 0]}>
               {g.params.map((p) => (
-                <Col span={12} key={p.key} style={{ paddingTop: 4 }}>
+                <Col xs={24} lg={12} key={p.key} style={{ paddingTop: 4 }}>
                   <Tooltip title={p.tip}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <span style={{ width: 130, fontSize: 13 }}>{p.label}</span>

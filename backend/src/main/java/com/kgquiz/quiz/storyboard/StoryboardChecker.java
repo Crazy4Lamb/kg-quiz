@@ -103,12 +103,16 @@ public final class StoryboardChecker {
         // ③ 答案一致：画面里写了"答案 X"就必须与题库一致
         if (questions != null) {
             for (Storyboard.Segment s : sb.getSegments()) {
-                for (Long qid : s.getQuestionIds()) {
-                    Question q = questions.get(qid);
-                    if (q == null) {
+                for (Storyboard.Visual v : s.getVisuals()) {
+                    Long qid = v.getQuestionId();
+                    if (qid != null && (!s.getQuestionIds().contains(qid) || !questions.containsKey(qid))) {
+                        issues.add(issue("ERROR", "QUESTION_SCOPE", "画面引用的题目未关联到本段：" + qid));
                         continue;
                     }
-                    for (Storyboard.Visual v : s.getVisuals()) {
+                    if (qid == null && s.getQuestionIds().size() == 1) qid = s.getQuestionIds().get(0);
+                    if (qid == null) continue;
+                    Question q = questions.get(qid);
+                    if (q != null) {
                         String conflict = findAnswerConflict(v.getText(), q.getAnswer());
                         if (conflict != null) {
                             issues.add(issue("ERROR", "ANSWER_MISMATCH", conflict));
@@ -131,19 +135,17 @@ public final class StoryboardChecker {
         if (isBlank(visualText) || isBlank(realAnswer)) {
             return null;
         }
-        String[] parts = visualText.split("答案|答[:：]|正确选项", -1);
-        if (parts.length < 2) {
+        var match = java.util.regex.Pattern.compile("(?:答案(?:是|为)?|答|正确选项)\\s*[:：]?\\s*([A-Za-z0-9+\\-.=/√]+)")
+                .matcher(visualText);
+        if (!match.find()) {
             return null;
         }
-        String claimed = parts[1].trim();
-        // 只取紧跟其后的短片段（标点或空格为界）
-        claimed = claimed.split("[，,。；;\\s]")[0].trim();
+        String claimed = match.group(1).replaceAll("[.。]+$", "");
         if (claimed.isEmpty() || claimed.length() > 12) {
             return null;
         }
         String real = realAnswer.trim();
         boolean same = real.equals(claimed)
-                || real.contains(claimed)
                 || normalize(claimed).equals(normalize(real));
         if (same) {
             return null;
@@ -153,7 +155,8 @@ public final class StoryboardChecker {
 
     /** 去掉空白与常见标点后比对，避免 "0.27" vs "0.27。" 之类误判 */
     private static String normalize(String s) {
-        return s.replaceAll("[\\s。．.，,、；;：:（）()【】\\[\\]]", "");
+        return s.replaceAll("[.。]+$", "").replace('．', '.')
+                .replaceAll("[\\s，,、；;：:（）()【】\\[\\]]", "");
     }
 
     private static int countLines(String narration) {

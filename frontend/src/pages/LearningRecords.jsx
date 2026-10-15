@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Card, Row, Col, Space, Tag, Typography, Select, Empty, List, Drawer, Statistic,
   Progress, Timeline, Alert, Segmented, message, Spin, Divider
@@ -41,6 +41,7 @@ export default function LearningRecords() {
   const [timeline, setTimeline] = useState([]);
   const [loading, setLoading] = useState(false);
   const [drawer, setDrawer] = useState(null); // { nodeId, nodeName }
+  const trajectoryVersion = useRef(0);
 
   const loadStudents = async () => {
     if (isStudent) return;
@@ -49,47 +50,39 @@ export default function LearningRecords() {
     } catch { /* 督导范围外可能为空 */ }
   };
 
-  const loadAll = async (sid) => {
-    if (!sid) return;
-    setLoading(true);
-    try {
-      const [ov, st, tl] = await Promise.all([
-        api.studentMastery(sid),
-        api.studentRecordStats(sid, { days }),
-        api.studentRecords(sid, { limit: 80 })
-      ]);
-      setOverview(unwrap(ov));
-      setStats(unwrap(st));
-      setTimeline(unwrap(tl) || []);
-    } catch (e) {
-      message.error(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => { loadStudents(); }, []);
   useEffect(() => {
-    if (isStudent) {
-      Promise.all([
-        api.myMastery().then((r) => setOverview(unwrap(r))),
-        api.myRecordStats({ days }).then((r) => setStats(unwrap(r))),
-        api.myRecords({ limit: 80 }).then((r) => setTimeline(unwrap(r) || []))
-      ]).catch((e) => message.error(e.message));
-    } else if (studentId) {
-      loadAll(studentId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let active = true;
+    trajectoryVersion.current += 1;
+    setDrawer(null);
+    setOverview(null);
+    setStats(null);
+    setTimeline([]);
+    if (!studentId) return () => { active = false; };
+    setLoading(true);
+    const requests = isStudent ? [
+      api.myMastery(), api.myRecordStats({ days }), api.myRecords({ limit: 80, days })
+    ] : [
+      api.studentMastery(studentId), api.studentRecordStats(studentId, { days }),
+      api.studentRecords(studentId, { limit: 80, days })
+    ];
+    Promise.all(requests).then(([ov, st, tl]) => {
+      if (!active) return;
+      setOverview(unwrap(ov)); setStats(unwrap(st)); setTimeline(unwrap(tl) || []);
+    }).catch((e) => { if (active) message.error(e.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [studentId, days, isStudent]);
 
   const openNode = async (nodeId, nodeName) => {
     if (!nodeId) return;
+    const version = ++trajectoryVersion.current;
     setDrawer({ nodeId, nodeName, loading: true, data: null });
     try {
       const r = unwrap(await api.nodeRecordTimeline(studentId, nodeId));
-      setDrawer((d) => ({ ...d, loading: false, data: r }));
+      if (version === trajectoryVersion.current) setDrawer((d) => d && ({ ...d, loading: false, data: r }));
     } catch (e) {
-      setDrawer((d) => ({ ...d, loading: false, error: e.message }));
+      if (version === trajectoryVersion.current) setDrawer((d) => d && ({ ...d, loading: false, error: e.message }));
     }
   };
 
@@ -102,14 +95,14 @@ export default function LearningRecords() {
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <Card size="small" title={<Space><LineChartOutlined />学习记录与掌握程度</Space>}
         extra={
-          <Space>
+          <Space wrap>
             {!isStudent && (
               <Select style={{ width: 220 }} value={studentId} placeholder="选择学生"
                 onChange={setStudentId} showSearch optionFilterProp="label"
                 options={students.map((s) => ({ value: s.id, label: `${s.name}（${s.id}）` }))} />
             )}
             <Segmented value={days} onChange={setDays} options={[
-              { label: '近7天', value: 7 }, { label: '近30天', value: 30 }, { label: '全部', value: 365 }
+              { label: '近7天', value: 7 }, { label: '近30天', value: 30 }, { label: '近一年', value: 365 }
             ]} />
           </Space>
         }>
@@ -118,19 +111,19 @@ export default function LearningRecords() {
           : <Spin spinning={loading}>
             {/* 统计卡片 */}
             <Row gutter={12} style={{ marginBottom: 12 }}>
-              <Col span={4}><Card size="small"><Statistic title="学习事件" value={stats?.eventCount || 0} /></Card></Col>
-              <Col span={4}><Card size="small"><Statistic title="涉及知识点" value={stats?.nodeCount || 0} /></Card></Col>
-              <Col span={4}><Card size="small"><Statistic title="练习时长" value={fmtDur(stats?.totalDurationSec)} /></Card></Col>
-              <Col span={4}><Card size="small"><Statistic title="做题量" value={stats?.questionCount || 0} /></Card></Col>
-              <Col span={4}><Card size="small"><Statistic title="平均正确率"
+              <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title="学习事件" value={stats?.eventCount || 0} /></Card></Col>
+              <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title="涉及知识点" value={stats?.nodeCount || 0} /></Card></Col>
+              <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title="记录时长" value={fmtDur(stats?.totalDurationSec)} /></Card></Col>
+              <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title="做题量" value={stats?.questionCount || 0} /></Card></Col>
+              <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title="平均得分率"
                 value={stats?.avgScoreRate == null ? '—' : pct(stats.avgScoreRate)} /></Card></Col>
-              <Col span={4}><Card size="small"><Statistic title="图谱覆盖率"
+              <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title="图谱覆盖率"
                 value={pct(overview?.coverage)} suffix={`/ ${overview?.totalNodes || 0}`} /></Card></Col>
             </Row>
 
             <Row gutter={12}>
               {/* 掌握程度分级 */}
-              <Col span={10}>
+              <Col xs={24} xl={10}>
                 <Card size="small" title="掌握程度分级" style={{ height: '100%' }}>
                   {(levelBars || []).map((lv) => (
                     <div key={lv.level} style={{ marginBottom: 6 }}>
@@ -161,7 +154,7 @@ export default function LearningRecords() {
               </Col>
 
               {/* 每日活跃趋势 */}
-              <Col span={14}>
+              <Col xs={24} xl={14}>
                 <Card size="small" title="每日学习活跃度" style={{ height: '100%' }}>
                   <DailyBars trend={stats?.dailyTrend || []} />
                   <Divider style={{ margin: '8px 0' }} />
@@ -185,12 +178,12 @@ export default function LearningRecords() {
                       const m = actionMeta(r.action);
                       return (
                         <List.Item>
-                          <Space size={8} align="start" style={{ width: '100%' }}>
+                          <Space wrap size={8} align="start" style={{ width: '100%' }}>
                             <Tag color={m.color} icon={m.icon}>{m.label}</Tag>
-                            <span style={{ fontWeight: 600, cursor: 'pointer', color: r.nodeId ? '#1677ff' : undefined }}
+                            <span style={{ fontWeight: 600, cursor: 'pointer', color: r.nodeId ? 'var(--color-primary)' : undefined }}
                               onClick={() => openNode(r.nodeId, r.nodeName)}>
                               {r.nodeName || '整卷'}</span>
-                            {r.scoreRate != null && <Tag>正确率 {pct(r.scoreRate)}</Tag>}
+                            {r.scoreRate != null && <Tag>得分率 {pct(r.scoreRate)}</Tag>}
                             {r.masteryBefore != null && r.masteryAfter != null && (
                               <Typography.Text type="secondary">
                                 {pct(r.masteryBefore)} → <b>{pct(r.masteryAfter)}</b>
@@ -212,7 +205,7 @@ export default function LearningRecords() {
       </Card>
 
       <Drawer title={drawer?.nodeName ? `知识点轨迹：${drawer.nodeName}` : '知识点轨迹'}
-        width={520} open={!!drawer} onClose={() => setDrawer(null)}>
+        width={520} open={!!drawer} onClose={() => { trajectoryVersion.current += 1; setDrawer(null); }}>
         {drawer?.loading && <Empty description="加载中…" />}
         {drawer?.error && <Alert type="error" message={drawer.error} />}
         {drawer?.data && <NodeTrajectory data={drawer.data} />}
@@ -234,10 +227,10 @@ function DailyBars({ trend }) {
         const bh = (t.count / max) * (h - 20);
         return (
           <g key={t.date}>
-            <rect x={i * bw + 2} y={h - bh - 16} width={Math.max(2, bw - 4)} height={bh}
-              fill={t.count > 0 ? '#1677ff' : '#eee'} rx={2} />
+            <rect x={i * bw + bw * 0.15} y={h - bh - 16} width={bw * 0.7} height={bh}
+              fill={t.count > 0 ? 'var(--color-primary)' : '#eee'} rx={2} />
             {(i % Math.ceil(trend.length / 10) === 0) && (
-              <text x={i * bw + bw / 2} y={h - 4} fontSize="9" fill="#999" textAnchor="middle">
+              <text x={i * bw + bw / 2} y={h - 4} fontSize="9" fill="var(--color-muted)" textAnchor="middle">
                 {t.date.slice(5)}
               </text>
             )}
@@ -267,7 +260,7 @@ function NodeTrajectory({ data }) {
                 <Tag color={m.color} icon={m.icon}>{m.label}</Tag>
                 <Typography.Text type="secondary">{fmtTime(r.createdAt)}</Typography.Text>
               </Space>
-              {r.scoreRate != null && <span>正确率 {pct(r.scoreRate)}</span>}
+              {r.scoreRate != null && <span>得分率 {pct(r.scoreRate)}</span>}
               {r.masteryBefore != null && r.masteryAfter != null && (
                 <span>掌握度 {pct(r.masteryBefore)} → <b>{pct(r.masteryAfter)}</b></span>
               )}
@@ -290,14 +283,14 @@ function MasterySparkline({ series }) {
   return (
     <Card size="small" title="掌握度变化">
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h}>
-        <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke="#eee" />
-        <line x1={pad} y1={pad} x2={pad} y2={h - pad} stroke="#eee" />
-        <polyline points={pts} fill="none" stroke="#1677ff" strokeWidth="2" />
+        <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke="var(--color-border)" />
+        <line x1={pad} y1={pad} x2={pad} y2={h - pad} stroke="var(--color-border)" />
+        <polyline points={pts} fill="none" stroke="var(--color-primary)" strokeWidth="2" />
         {series.map((r, i) => (
-          <circle key={i} cx={x(i)} cy={y(r.masteryAfter)} r="3" fill="#1677ff" />
+          <circle key={i} cx={x(i)} cy={y(r.masteryAfter)} r="3" fill="var(--color-primary)" />
         ))}
-        <text x={pad} y={h - 4} fontSize="9" fill="#999">0%</text>
-        <text x={pad} y={pad + 2} fontSize="9" fill="#999">100%</text>
+        <text x={pad} y={h - 4} fontSize="9" fill="var(--color-muted)">0%</text>
+        <text x={pad} y={pad + 2} fontSize="9" fill="var(--color-muted)">100%</text>
       </svg>
     </Card>
   );

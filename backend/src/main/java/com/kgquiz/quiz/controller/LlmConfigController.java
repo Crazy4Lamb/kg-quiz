@@ -5,6 +5,7 @@ import com.kgquiz.quiz.auth.RequireRole;
 import com.kgquiz.quiz.auth.UserContext;
 import com.kgquiz.quiz.auth.UserRole;
 import com.kgquiz.quiz.common.BizException;
+import com.kgquiz.quiz.common.ForbiddenException;
 import com.kgquiz.quiz.common.R;
 import com.kgquiz.quiz.llm.LlmAuth;
 import com.kgquiz.quiz.llm.LlmProtocol;
@@ -100,6 +101,9 @@ public class LlmConfigController {
     @PostMapping("/test")
     @RequireRole({UserRole.TEACHER, UserRole.ADMIN})
     public R<Map<String, Object>> test(@RequestBody(required = false) Map<String, Object> body) {
+        if (body != null && !body.isEmpty() && !UserContext.require().isAdmin()) {
+            throw new ForbiddenException("仅平台管理员可测试未保存配置；教师可测试当前生效配置");
+        }
         long start = System.currentTimeMillis();
         Map<String, Object> m = new LinkedHashMap<>();
 
@@ -119,6 +123,12 @@ public class LlmConfigController {
                 && !String.valueOf(body.get("apiKey")).isBlank()
                 ? String.valueOf(body.get("apiKey")).trim()
                 : base.apiKey();
+        boolean sameDestination = java.util.Objects.equals(baseUrl, base.baseUrl())
+                && java.util.Objects.equals(auth, base.auth())
+                && java.util.Objects.equals(authHeader, base.authHeader());
+        if (!sameDestination && (body == null || str(body.get("apiKey")) == null || str(body.get("apiKey")).isBlank())) {
+            apiKey = null;
+        }
 
         m.put("protocol", protocol.name());
         m.put("protocolLabel", protocol.label());
@@ -147,7 +157,10 @@ public class LlmConfigController {
         }
 
         try {
-            String reply = llm.chat(
+            LlmClient.LlmSettings draft = new LlmClient.LlmSettings(true, protocol, auth,
+                    baseUrl, chatPath, apiKey, authHeader, model,
+                    base.timeoutSeconds(), 64, 0, base.presetCode(), "连通性测试草稿");
+            String reply = llm.chatWithSettings(draft,
                     "你是一个连通性测试端点，请只回复一句话，不超过 20 个字，不要加引号或解释。",
                     "回复「已连接」两个字即可。",
                     false);
@@ -161,7 +174,7 @@ public class LlmConfigController {
             m.put("ok", false);
             m.put("costMs", cost);
             m.put("stage", classify(e));
-            m.put("message", rootMsg(e));
+            m.put("message", LlmClient.redact(rootMsg(e), apiKey));
             m.put("hint", hint(e, protocol));
         }
         return R.ok(m);
@@ -234,7 +247,7 @@ public class LlmConfigController {
         if (auth == LlmAuth.QUERY_KEY && apiKey != null && !apiKey.isBlank()) {
             url += (url.contains("?") ? "&" : "?") + "key=****";
         }
-        return url;
+        return LlmClient.redact(url, apiKey);
     }
 
     /** 保存前校验，把常见配错挡在落库之前 */
@@ -250,6 +263,9 @@ public class LlmConfigController {
         if (model == null || model.isBlank()) {
             throw new BizException("请填写模型名");
         }
+        numeric(body, "timeoutSeconds", 5, 600);
+        numeric(body, "maxTokens", 1, 32000);
+        numeric(body, "temperature", 0, 2);
         LlmProtocol protocol = LlmProtocol.of(str(body.get("protocol")));
         String chatPath = str(body.get("chatPath"));
         if (protocol == LlmProtocol.GEMINI
@@ -267,6 +283,19 @@ public class LlmConfigController {
     }
 
     /** orgId 只有 ADMIN 能指定，避免机构管理员改到平台配置 */
+    private static void numeric(Map<String, Object> body, String key, double min, double max) {
+        if (body.get(key) == null) return;
+        try {
+            double value = Double.parseDouble(String.valueOf(body.get(key)));
+            if (!Double.isFinite(value) || value < min || value > max
+                    || (!"temperature".equals(key) && value != Math.rint(value))) {
+                throw new NumberFormatException();
+            }
+        } catch (NumberFormatException e) {
+            throw new BizException(key + " 必须在 " + min + " 到 " + max + " 范围内");
+        }
+    }
+
     private static Long resolveOrgId(Object raw) {
         CurrentUser user = UserContext.require();
         Long requested = raw == null ? null : Long.valueOf(String.valueOf(raw));

@@ -175,7 +175,7 @@ public class StoryboardService {
                       "questionIds": [题库中真实存在的题目id],
                       "visuals": [
                         {"type": "TEXT|FORMULA|QUESTION|DIAGRAM", "text": "画面文字",
-                         "anchorLine": 1, "anchorRatio": 0.3, "holdSeconds": 8}
+                         "questionId": 题目id或null, "anchorLine": 1, "anchorRatio": 0.3, "holdSeconds": 8}
                       ]
                     }
                   ]
@@ -186,6 +186,7 @@ public class StoryboardService {
                 3. visuals.anchorLine 是「本段 narration 内部的行号」，不要写绝对秒数；
                 4. questionIds 只能从下方给出的「已有配套题目」里选 id，**严禁编造**；
                 5. 数学内容必须公式正确；若引用题目，narration 中的答案必须与该题答案一致；
+                   引用题目答案的画面必须填写 questionId，且属于本段 questionIds；
                 6. kind 的使用建议：HOOK 情境导入 → TEACH 概念新授 → DEMO 推导演示 →
                    EXAMPLE 例题 → PRACTICE 随堂练习 → RECAP 小结。
                 """;

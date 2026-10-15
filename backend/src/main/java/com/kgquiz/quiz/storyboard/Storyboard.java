@@ -126,6 +126,8 @@ public class Storyboard {
         private String type = V_TEXT;
         /** 画面上显示的内容。公式用 $...$ 包裹，前端可交给公式渲染 */
         private String text;
+        /** 此画面引用的题目；多题分段用它避免将答案与另一题错配。 */
+        private Long questionId;
         /** 相对锚点：段落内旁白行号（从 1 起） */
         private Integer anchorLine;
         /** 相对锚点：该行内部比例 0~1 */
@@ -152,6 +154,7 @@ public class Storyboard {
             v.setType(V_QUESTION);
             v.setText(text);
             if (questionId != null) {
+                v.setQuestionId(questionId);
                 v.setAnchorLine(1);
             }
             return v;

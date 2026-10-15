@@ -77,7 +77,7 @@ public class MasteryProfileService {
             double solid = cfg.solidThreshold();
             // 中间一级取几何中点，保证「入门」在薄弱与熟练之间有合理宽度
             double basic = Math.sqrt(Math.max(1e-6, weak * solid));
-            double proficient = solid + (1 - solid) * 0.6;
+            double proficient = solid;
             return new Thresholds(weak, basic, proficient);
         }
     }
@@ -130,6 +130,7 @@ public class MasteryProfileService {
     private final MasteryService masteryService;
     private final StudentGraphMapper studentGraphMapper;
     private final GraphStore graphStore;
+    private final StudentAccessService studentAccessService;
 
     /** 学生所复制图谱的模板 id；没复制过图谱返回 null */
     public Long graphIdOf(Long studentId) {
@@ -143,12 +144,7 @@ public class MasteryProfileService {
 
     /** 学生所在图谱所属机构（图谱按机构隔离，配置也按机构取） */
     public Long orgIdOf(Long studentId) {
-        Long graphId = graphIdOf(studentId);
-        if (graphId == null) {
-            return null;
-        }
-        var graph = graphStore.findGraph(graphId);
-        return graph == null ? null : graph.getOrgId();
+        return studentAccessService.requireStudent(studentId).getOrgId();
     }
 
     /**
@@ -157,6 +153,7 @@ public class MasteryProfileService {
      * @param cfg 推荐规则配置（提供半衰期、置信度达标次数与分级阈值）
      */
     public Profile profile(Long studentId, Long nodeId, RecommendService.Config cfg) {
+        studentAccessService.requireStudent(studentId);
         StudentNodeState st = masteryService.stateOf(studentId, nodeId);
         if (st == null) {
             return profileOf(nodeId, null, cfg);
@@ -166,6 +163,7 @@ public class MasteryProfileService {
 
     /** 批量计算，图谱内的所有节点都要给一份（没状态的按未接触） */
     public Map<Long, Profile> profiles(Long studentId, Long graphId, RecommendService.Config cfg) {
+        studentAccessService.requireStudent(studentId);
         if (graphId == null) {
             // 学生还没复制图谱：没有可评估的对象，返回空而不是抛错，让页面能正常渲染空态
             return Map.of();
@@ -234,7 +232,8 @@ public class MasteryProfileService {
         }
         double halfLife = Math.max(0.5, cfg.forgettingHalfLifeDays());
         double factor = Math.pow(2, -(double) daysSince / halfLife);
-        double floor = peak * cfg.decayFloorRatio();
+        // 历史峰值不能抬高最近一次测评事实（例如教师纠正了误判的高分）。
+        double floor = Math.min(raw, peak * cfg.decayFloorRatio());
         return clamp(Math.max(raw * factor, floor));
     }
 
@@ -381,7 +380,7 @@ public class MasteryProfileService {
         if (last == null) {
             return -1;
         }
-        return (int) Duration.between(last, LocalDateTime.now()).toDays();
+        return Math.max(0, (int) Duration.between(last, LocalDateTime.now()).toDays());
     }
 
     private static double clamp(double v) {

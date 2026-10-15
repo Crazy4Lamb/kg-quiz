@@ -3,6 +3,7 @@ package com.kgquiz.quiz.dto;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.Valid;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -11,7 +12,7 @@ import java.util.List;
  * 教师批改：逐题改分 + 评语。提交即定稿。
  */
 public record GradeReq(
-        @NotEmpty(message = "没有要批改的题目") List<Item> items) {
+        @NotEmpty(message = "没有要批改的题目") @Valid List<@NotNull Item> items) {
 
     public record Item(
             @NotNull Long questionId,

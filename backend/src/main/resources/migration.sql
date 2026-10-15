@@ -143,3 +143,9 @@ CREATE TABLE IF NOT EXISTS learning_record (
 -- 3) 推荐规则从「一条公式」升级为「策略 + 多因子」，strategy 决定因子的组合方式。
 ALTER TABLE recommend_rule ADD COLUMN strategy VARCHAR(24) NOT NULL DEFAULT 'BALANCED'
     COMMENT '推荐策略：REMEDIATION 补弱优先 / SEQUENTIAL 顺序推进 / EXAM 应试优先 / BALANCED 均衡';
+
+-- 老版本已经测评过的状态至少有一次观测。只修补缺失的新字段，重复启动不会增加次数。
+UPDATE student_node_state
+SET practice_count = 1, mastery_peak = mastery,
+    last_score_rate = COALESCE(last_score_rate, mastery)
+WHERE last_practiced_at IS NOT NULL AND practice_count = 0;

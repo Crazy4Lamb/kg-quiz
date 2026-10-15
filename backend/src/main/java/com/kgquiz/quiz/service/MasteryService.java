@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.kgquiz.quiz.config.KgProperties;
 import com.kgquiz.quiz.entity.StudentGraph;
 import com.kgquiz.quiz.entity.StudentNodeState;
+import com.kgquiz.quiz.entity.LearningRecord;
+import com.kgquiz.quiz.mapper.LearningRecordMapper;
 import com.kgquiz.quiz.mapper.StudentGraphMapper;
 import com.kgquiz.quiz.mapper.StudentNodeStateMapper;
 import lombok.RequiredArgsConstructor;
@@ -28,7 +30,8 @@ import java.util.Map;
  *       {@code mastery_new = old×(1-α) + α×得分率}。</li>
  *   <li>{@link #adjustByRateDelta} 教师改分后按<b>增量</b>修正
  *       {@code mastery += α×Δrate}。不重放历史答题记录，因为初始掌握度可能来自
- *       系统外（导入的历史学情），重放会把那些值抹掉；EMA 是线性的，增量修正等价。</li>
+ *       系统外（导入的历史学情），重放会把那些值抹掉。历史改分按后续练习次数衰减影响，
+ *       后续诊断覆盖过的旧观测不再影响当前水平。</li>
  * </ol>
  *
  * <p>三条路径都会同步维护 {@code practiceCount}（置信度分母）、{@code lastScoreRate}
@@ -42,6 +45,7 @@ public class MasteryService {
     private final StudentGraphMapper studentGraphMapper;
     private final StudentNodeStateMapper studentNodeStateMapper;
     private final KgProperties kgProperties;
+    private final LearningRecordMapper learningRecordMapper;
 
     /**
      * 一次掌握度变化：{@code before} 为动作前的值，{@code after} 为动作后的值。
@@ -94,6 +98,9 @@ public class MasteryService {
             StudentNodeState state = stateByGraph(sg.getId(), nodeId);
             state.setMastery(BigDecimal.ZERO);
             state.setLastPracticedAt(null);
+            state.setLastScoreRate(null);
+            state.setPracticeCount(0);
+            state.setMasteryPeak(BigDecimal.ZERO);
             persist(state);
         }
     }
@@ -104,6 +111,56 @@ public class MasteryService {
      * @param nodeRateDelta 节点 -> 得分率变化量（可正可负）
      */
     public Map<Long, MasteryChange> adjustByRateDelta(Long studentId, Map<Long, Double> nodeRateDelta) {
+        return adjustByRateDelta(studentId, nodeRateDelta, kgProperties.getExam().getLearningRate());
+    }
+
+    /** 改分是修正已有观测，不是新增练习；诊断覆盖式观测的系数为 1。 */
+    public Map<Long, MasteryChange> adjustByRateDelta(Long studentId, Map<Long, Double> nodeRateDelta,
+                                                    double coefficient) {
+        return correct(studentId, nodeRateDelta, Map.of(), coefficient, Map.of());
+    }
+
+    /** 保留后续练习的 EMA 权重：旧观测的修正 = 原系数 × (1-α)^后续练习次数 × Δrate。 */
+    public Map<Long, MasteryChange> correctExam(Long studentId, Long examId, boolean diagnosis,
+                                               Map<Long, Double> delta, Map<Long, Double> correctedRates) {
+        if (delta == null || delta.isEmpty()) return Map.of();
+        var history = learningRecordMapper.selectList(new LambdaQueryWrapper<LearningRecord>()
+                .eq(LearningRecord::getStudentId, studentId)
+                .in(LearningRecord::getNodeId, delta.keySet())
+                .and(q -> q.eq(LearningRecord::getRefType, LearningRecord.R_EXAM).or().eq(LearningRecord::getRefType, "NODE"))
+                .in(LearningRecord::getAction, LearningRecord.A_PRACTICE, LearningRecord.A_DIAGNOSIS, LearningRecord.A_ADJUST)
+                .isNotNull(LearningRecord::getMasteryAfter)
+                .orderByAsc(LearningRecord::getId));
+        double alpha = kgProperties.getExam().getLearningRate();
+        double base = diagnosis ? 1 : alpha;
+        Map<Long, Double> coefficients = new LinkedHashMap<>();
+        Map<Long, Double> latestRates = new LinkedHashMap<>();
+        for (Long nodeId : delta.keySet()) {
+            LearningRecord target = null;
+            double coefficient = base;
+            boolean latest = true;
+            for (LearningRecord event : history) {
+                if (!nodeId.equals(event.getNodeId())) continue;
+                if (LearningRecord.A_ADJUST.equals(event.getAction()) && !"NODE".equals(event.getRefType())) continue;
+                if (examId.equals(event.getRefId()) && !"NODE".equals(event.getRefType())) {
+                    target = event;
+                    coefficient = base;
+                    latest = true;
+                } else if (target != null) {
+                    coefficient = LearningRecord.A_DIAGNOSIS.equals(event.getAction()) || "NODE".equals(event.getRefType())
+                            ? 0 : coefficient * (1 - alpha);
+                    latest = false;
+                }
+            }
+            coefficients.put(nodeId, coefficient);
+            if (target != null && latest && correctedRates.containsKey(nodeId)) latestRates.put(nodeId, correctedRates.get(nodeId));
+        }
+        return correct(studentId, delta, coefficients, base, latestRates);
+    }
+
+    private Map<Long, MasteryChange> correct(Long studentId, Map<Long, Double> nodeRateDelta,
+                                             Map<Long, Double> coefficients, double fallback,
+                                             Map<Long, Double> latestRates) {
         if (nodeRateDelta == null || nodeRateDelta.isEmpty()) {
             return Map.of();
         }
@@ -112,8 +169,23 @@ public class MasteryService {
             log.warn("学生 {} 无图谱副本，跳过掌握度修正", studentId);
             return Map.of();
         }
-        double alpha = kgProperties.getExam().getLearningRate();
-        return apply(sg, nodeRateDelta, (old, delta) -> Math.max(0, Math.min(1, old + alpha * delta)));
+        Map<Long, MasteryChange> changes = new LinkedHashMap<>();
+        for (var entry : nodeRateDelta.entrySet()) {
+            if (entry.getValue() == null || !Double.isFinite(entry.getValue())) {
+                continue;
+            }
+            double delta = Math.max(-1, Math.min(1, entry.getValue()));
+            StudentNodeState state = stateByGraph(sg.getId(), entry.getKey());
+            double before = state.getMastery() == null ? 0 : state.getMastery().doubleValue();
+            double after = clamp(before + coefficients.getOrDefault(entry.getKey(), fallback) * delta);
+            state.setMastery(scale(after));
+            if (latestRates.containsKey(entry.getKey())) state.setLastScoreRate(scale(latestRates.get(entry.getKey())));
+            // 保留练习次数与练习时间，避免改分伪造学习行为。
+            persist(state);
+            changes.put(entry.getKey(), new MasteryChange(entry.getKey(), before, after,
+                    state.getPracticeCount()));
+        }
+        return changes;
     }
 
     /** 当前学生掌握状态（按模板节点 id 索引） */

@@ -12,26 +12,27 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { api, unwrap } from './api.js';
 import { readSession, clearSession, subscribeSession, ROLE, ROLE_LABEL, homePathOf } from './auth.js';
 import Login from './pages/Login.jsx';
-import AdminConsole from './pages/AdminConsole.jsx';
-import OrgConsole from './pages/OrgConsole.jsx';
-import GraphList from './pages/GraphList.jsx';
-import SearchPage from './pages/SearchPage.jsx';
-import StudentList from './pages/StudentList.jsx';
-import QuestionList from './pages/QuestionList.jsx';
-import ExamCenter from './pages/ExamCenter.jsx';
-import PaperTake from './pages/PaperTake.jsx';
-import GradingDesk from './pages/GradingDesk.jsx';
-import MyAssignments from './pages/MyAssignments.jsx';
-import LearnHome from './pages/LearnHome.jsx';
-import DiagnosisReport from './pages/DiagnosisReport.jsx';
-import NodeContent from './pages/NodeContent.jsx';
-import ContentManage from './pages/ContentManage.jsx';
-import RecommendRules from './pages/RecommendRules.jsx';
-import Agents from './pages/Agents.jsx';
-import LlmSettings from './pages/LlmSettings.jsx';
-import LearningRecords from './pages/LearningRecords.jsx';
 import ThemePicker from './components/ThemePicker.jsx';
 
+
+const AdminConsole = lazy(() => import('./pages/AdminConsole.jsx'));
+const OrgConsole = lazy(() => import('./pages/OrgConsole.jsx'));
+const GraphList = lazy(() => import('./pages/GraphList.jsx'));
+const SearchPage = lazy(() => import('./pages/SearchPage.jsx'));
+const StudentList = lazy(() => import('./pages/StudentList.jsx'));
+const QuestionList = lazy(() => import('./pages/QuestionList.jsx'));
+const ExamCenter = lazy(() => import('./pages/ExamCenter.jsx'));
+const PaperTake = lazy(() => import('./pages/PaperTake.jsx'));
+const GradingDesk = lazy(() => import('./pages/GradingDesk.jsx'));
+const MyAssignments = lazy(() => import('./pages/MyAssignments.jsx'));
+const LearnHome = lazy(() => import('./pages/LearnHome.jsx'));
+const DiagnosisReport = lazy(() => import('./pages/DiagnosisReport.jsx'));
+const NodeContent = lazy(() => import('./pages/NodeContent.jsx'));
+const ContentManage = lazy(() => import('./pages/ContentManage.jsx'));
+const RecommendRules = lazy(() => import('./pages/RecommendRules.jsx'));
+const Agents = lazy(() => import('./pages/Agents.jsx'));
+const LlmSettings = lazy(() => import('./pages/LlmSettings.jsx'));
+const LearningRecords = lazy(() => import('./pages/LearningRecords.jsx'));
 const GraphEditor = lazy(() => import('./pages/GraphEditor.jsx'));
 const StudentGraphView = lazy(() => import('./pages/StudentGraphView.jsx'));
 
@@ -59,7 +60,7 @@ const MENUS = [
     labelByRole: { STUDENT: '我的学习记录' },
     roles: [ROLE.STUDENT, ROLE.TEACHER, ROLE.CAMPUS_ADMIN, ROLE.ORG_ADMIN, ROLE.ADMIN] },
   { key: '/recommend-rules', icon: <SlidersOutlined />, label: '推荐配置',
-    roles: [ROLE.TEACHER, ROLE.ORG_ADMIN, ROLE.ADMIN] },
+    roles: [ROLE.TEACHER, ROLE.CAMPUS_ADMIN, ROLE.ORG_ADMIN, ROLE.ADMIN] },
   { key: '/agents', icon: <RobotOutlined />, label: 'Agent 管理', roles: [ROLE.ORG_ADMIN, ROLE.ADMIN] },
   { key: '/llm-settings', icon: <CloudServerOutlined />, label: '大模型接入', roles: [ROLE.ORG_ADMIN, ROLE.ADMIN] },
   { key: '/admin', icon: <SettingOutlined />, label: '系统运维', roles: [ROLE.ADMIN] }
@@ -229,7 +230,7 @@ function Shell({ session, onLogout }) {
             <div><h1>{title}</h1><p>{DESCRIPTIONS[selected] || '探索知识的连接，让每一步都更有收获。'}</p></div>
             <div className="welcome-art" aria-hidden="true"><i /><i /><i /><span>✦</span></div>
           </section>}
-          <Suspense fallback={<Card loading aria-label="正在加载图谱" style={{ minHeight: 320 }} />}>
+          <Suspense fallback={<Card loading aria-label="正在加载页面" style={{ minHeight: 320 }} />}>
           <Routes>
             <Route path="/" element={<Navigate to={homePathOf(user)} replace />} />
             <Route path="/search" element={<SearchPage />} />
@@ -256,8 +257,10 @@ function Shell({ session, onLogout }) {
                 <Route path="/contents" element={<ContentManage />} />
                 <Route path="/recommend-rules" element={<RecommendRules />} />
                 <Route path="/learning-records" element={<LearningRecords />} />
-                <Route path="/agents" element={<Agents />} />
-                <Route path="/llm-settings" element={<LlmSettings />} />
+                {(user.role === ROLE.ADMIN || user.role === ROLE.ORG_ADMIN) && <>
+                  <Route path="/agents" element={<Agents />} />
+                  <Route path="/llm-settings" element={<LlmSettings />} />
+                </>}
               </>
             )}
 

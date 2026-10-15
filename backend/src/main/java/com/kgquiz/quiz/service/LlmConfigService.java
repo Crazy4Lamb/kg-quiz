@@ -51,10 +51,6 @@ public class LlmConfigService {
             if (rows == null || rows.isEmpty()) {
                 return null;
             }
-            // 单租户形态（库里只有平台行）时直接用它
-            if (rows.size() == 1) {
-                return rows.get(0);
-            }
             // 多租户：优先匹配当前用户所属机构，找不到再用平台行
             Long orgId = currentOrgId();
             if (orgId != null) {
@@ -69,7 +65,8 @@ public class LlmConfigService {
                     return c;
                 }
             }
-            return rows.get(0);
+            // 无本机构/平台配置时交回环境变量，绝不能借用其他机构的密钥。
+            return null;
         } catch (Exception e) {
             // 配置表缺失或查询失败不该拖垮整个应用，退回环境变量
             log.debug("读取 llm_config 失败，回落环境变量配置: {}", e.getMessage());
@@ -132,7 +129,7 @@ public class LlmConfigService {
      */
     public LlmConfig save(Long orgId, Map<String, Object> body) {
         LlmProtocol protocol = LlmProtocol.of(str(body.get("protocol")));
-        LlmAuth auth = LlmAuth.of(str(body.get("auth")));
+        LlmAuth auth = body.get("auth") == null ? protocol.defaultAuth() : LlmAuth.of(str(body.get("auth")));
         String chatPath = str(body.get("chatPath"));
         if (chatPath == null || chatPath.isBlank()) {
             chatPath = protocol.defaultChatPath();
@@ -204,7 +201,7 @@ public class LlmConfigService {
         String reason = llm.unavailableReason();
         m.put("reason", reason == null ? "" : reason);
 
-        LlmConfig row = currentRow(null);
+        LlmConfig row = currentRow(currentOrgId());
         m.put("configured", row != null);
         m.put("current", row == null ? null : safeRow(row));
         m.put("presets", LlmPresetCatalog.allAsMaps());
@@ -251,8 +248,8 @@ public class LlmConfigService {
         m.put("auth", row.getAuth());
         m.put("authLabel", LlmAuth.of(row.getAuth()).label());
         m.put("authHeader", row.getAuthHeader());
-        m.put("baseUrl", row.getBaseUrl());
-        m.put("chatPath", row.getChatPath());
+        m.put("baseUrl", LlmClient.redact(row.getBaseUrl(), row.getApiKey()));
+        m.put("chatPath", LlmClient.redact(row.getChatPath(), row.getApiKey()));
         m.put("model", row.getModel());
         m.put("timeoutSeconds", row.getTimeoutSeconds());
         m.put("maxTokens", row.getMaxTokens());

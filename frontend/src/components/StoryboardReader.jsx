@@ -58,6 +58,7 @@ export default function StoryboardReader({ data, practiceOnNode }) {
   const jump = (i) => {
     const n = Math.max(0, Math.min(total - 1, i));
     setStep(n);
+    setMode('step');
     bodyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -138,6 +139,7 @@ export default function StoryboardReader({ data, practiceOnNode }) {
         </Space>
       </Card>
 
+      <div ref={bodyRef}>
       {mode === 'step' ? (
         <SegmentCard seg={cur} meta={curMeta} highlight />
       ) : (
@@ -147,10 +149,11 @@ export default function StoryboardReader({ data, practiceOnNode }) {
           ))}
         </Space>
       )}
+      </div>
 
       <Divider style={{ margin: 0 }} />
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        讲解按段落推进而不是按固定秒数对齐，所以可以任意跳读、倍速播放，画面不会与旁白错位。
+        点击段落可以跳读；预计时长仅供安排学习节奏，当前课件按阅读步骤推进。
       </Typography.Text>
     </Space>
   );
@@ -172,7 +175,7 @@ function SegmentCard({ seg, meta, highlight, onJump }) {
       extra={onJump && (
         <Button size="small" type="link" onClick={onJump}>跳到这里</Button>
       )}
-      style={highlight ? { borderLeft: '3px solid #1677ff' } : undefined}
+      style={highlight ? { borderLeft: '3px solid var(--color-primary)' } : undefined}
     >
       <Typography.Paragraph style={{ marginBottom: 8, whiteSpace: 'pre-wrap' }}>
         {seg.narration}
@@ -201,9 +204,9 @@ function SegmentCard({ seg, meta, highlight, onJump }) {
                   key={i}
                   style={{
                     padding: '6px 10px',
-                    background: highlight ? '#f0f7ff' : '#fafafa',
+                    background: highlight ? 'var(--color-soft)' : 'var(--color-surfaceAlt)',
                     borderRadius: 4,
-                    borderLeft: `2px solid ${highlight ? '#1677ff' : '#d9d9d9'}`
+                    borderLeft: `2px solid ${highlight ? 'var(--color-primary)' : 'var(--color-border)'}`
                   }}
                 >
                   <Space size={6} wrap>
@@ -289,7 +292,7 @@ export function StoryboardPreview({ storyboard }) {
               {!!s.visuals?.length && (
                 <div style={{ marginTop: 4 }}>
                   {s.visuals.map((v, k) => (
-                    <div key={k} style={{ fontSize: 12, color: '#555' }}>
+                    <div key={k} style={{ fontSize: 12, color: 'var(--color-muted)' }}>
                       · [{VISUAL_META[v.type]?.label || v.type}] {v.text}
                       {v.anchorLine ? `（锚点 第${v.anchorLine}行）` : ''}
                     </div>

@@ -148,9 +148,16 @@ public class LlmClient {
      *                  协议支持则带 response_format / responseMimeType，不支持则仅靠提示词
      */
     public String chat(String systemPrompt, String userPrompt, boolean jsonMode) {
-        LlmSettings s = settings();
-        if (!available()) {
-            throw new BizException(unavailableReason());
+        return chatWithSettings(settings(), systemPrompt, userPrompt, jsonMode);
+    }
+
+    /** 管理台用草稿配置试连通；使用同一份快照构造并发送请求。 */
+    public String chatWithSettings(LlmSettings s, String systemPrompt, String userPrompt, boolean jsonMode) {
+        if (!s.enabled()) {
+            throw new BizException("大模型功能已关闭");
+        }
+        if (s.auth().keyRequired() && (s.apiKey() == null || s.apiKey().isBlank())) {
+            throw new BizException("尚未配置大模型 API Key");
         }
         long start = System.currentTimeMillis();
         String url = "(未构造)";
@@ -173,13 +180,13 @@ public class LlmClient {
             return text;
         } catch (LlmProtocolCodec.LlmDecodeException e) {
             // 解码失败是可预期的（换端点/换厂商时常见），给明确提示而不是 500
-            throw new BizException("大模型响应无法解析（" + s.protocol().label() + "）：" + e.getMessage());
+            throw new BizException("大模型响应无法解析（" + s.protocol().label() + "）：" + redact(e.getMessage(), s.apiKey()));
         } catch (BizException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("大模型调用失败 protocol={} model={} url={}: {}",
-                    s.protocol(), s.model(), url, e.getMessage());
-            throw new BizException("大模型调用失败：" + rootMessage(e));
+            String safeError = redact(rootMessage(e), s.apiKey());
+            log.warn("大模型调用失败 protocol={} model={}: {}", s.protocol(), s.model(), safeError);
+            throw new BizException("大模型调用失败：" + safeError);
         }
     }
 
@@ -212,10 +219,9 @@ public class LlmClient {
                 jsonMode && s.protocol().supportsJsonMode());
     }
 
-    /** 每个配置指纹一个 RestClient，换端点/换协议时自动换实例 */
+    /** 仅按超时复用无状态客户端；端点、鉴权和请求体在每次调用时设置。 */
     private RestClient client(LlmSettings s) {
-        String fingerprint = s.protocol() + "|" + s.baseUrl() + "|" + s.authHeader()
-                + "|" + s.timeoutSeconds() + "|" + (s.apiKey() == null ? "" : s.apiKey());
+        String fingerprint = String.valueOf(s.timeoutSeconds());
         return clientCache.computeIfAbsent(fingerprint, k -> {
             SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
             Duration timeout = Duration.ofSeconds(Math.max(5, s.timeoutSeconds()));
@@ -293,6 +299,16 @@ public class LlmClient {
         return flat.length() <= 200 ? flat : flat.substring(0, 200) + "…";
     }
 
+    public static String redact(String text, String apiKey) {
+        if (text == null) return "未知错误";
+        String safe = text;
+        if (apiKey != null && !apiKey.isBlank()) {
+            safe = safe.replace(apiKey, "****")
+                    .replace(java.net.URLEncoder.encode(apiKey, java.nio.charset.StandardCharsets.UTF_8), "****");
+        }
+        return safe.replaceAll("(?i)([?&](?:key|api_key|api-key|token)=)[^&\\s\"']+", "$1****");
+    }
+
     /**
      * 生效配置的只读快照。apiKey 永不出现在这里 —— 管理台要用掩码回显，
      * 泄漏真实 Key 到前端等于把密钥交给任何能开页面的人。
@@ -334,8 +350,8 @@ public class LlmClient {
             m.put("protocolLabel", protocol.label());
             m.put("auth", auth.name());
             m.put("authLabel", auth.label());
-            m.put("baseUrl", baseUrl);
-            m.put("chatPath", chatPath);
+            m.put("baseUrl", redact(baseUrl, apiKey));
+            m.put("chatPath", redact(chatPath, apiKey));
             m.put("authHeader", authHeader);
             m.put("model", model);
             m.put("timeoutSeconds", timeoutSeconds);

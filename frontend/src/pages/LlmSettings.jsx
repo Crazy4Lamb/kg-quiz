@@ -8,6 +8,7 @@ import {
   SafetyCertificateOutlined, InfoCircleOutlined, CheckCircleOutlined, CloseCircleOutlined
 } from '@ant-design/icons';
 import { api, unwrap } from '../api.js';
+import { readSession, ROLE } from '../auth.js';
 
 const STAGE_LABEL = {
   CONFIG: '配置不完整',
@@ -50,14 +51,14 @@ export default function LlmSettings() {
 
   const presets = overview?.presets || [];
   const effective = overview?.effective || {};
-  const canWrite = true; // 后端按角色把关；这里只管展示
+  const canWrite = readSession()?.user?.role === ROLE.ADMIN;
 
   const load = async () => {
     setLoading(true);
     try {
       const ov = unwrap(await api.llmOverview()) || {};
       setOverview(ov);
-      const c = ov.current;
+      const c = ov.current || ov.effective;
       form.setFieldsValue({
         presetCode: c?.presetCode || 'deepseek',
         protocol: c?.protocol || 'OPENAI',
@@ -113,8 +114,8 @@ export default function LlmSettings() {
     setTesting(true);
     setResult(null);
     try {
-      const v = form.getFieldsValue();
-      const r = unwrap(await api.testLlm({
+      const v = form.getFieldsValue(true);
+      const r = unwrap(await api.testLlm(canWrite ? {
         protocol: v.protocol,
         auth: v.auth,
         authHeader: v.authHeader,
@@ -122,7 +123,7 @@ export default function LlmSettings() {
         chatPath: v.chatPath,
         model: v.model,
         apiKey: v.apiKey
-      })) || {};
+      } : undefined)) || {};
       setResult(r);
       if (r.ok) {
         message.success(`连接成功，耗时 ${r.costMs}ms`);
@@ -139,7 +140,8 @@ export default function LlmSettings() {
   const save = async () => {
     setSaving(true);
     try {
-      const v = await form.validateFields();
+      await form.validateFields();
+      const v = form.getFieldsValue(true);
       await api.saveLlmConfig({ ...v, orgId: overview?.current?.orgId ?? null });
       message.success('已保存，立即生效（无需重启）');
       setResult(null);
@@ -204,6 +206,7 @@ export default function LlmSettings() {
             <Space>
               <Typography.Text type="secondary">启用</Typography.Text>
               <Switch
+                disabled={!canWrite || !overview?.configured || saving || testing}
                 checked={watchedEnabled ?? overview?.current?.enabled ?? true}
                 onChange={(v) => {
                   // 立即改表单值，让「保存」能把这个状态一起提交
@@ -248,7 +251,7 @@ export default function LlmSettings() {
         )}
       </Card>
 
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" disabled={!canWrite} onValuesChange={() => setResult(null)}>
         <Row gutter={12}>
           <Col xs={24} lg={12}>
             <Card size="small" title="选择厂商预设"
@@ -273,7 +276,11 @@ export default function LlmSettings() {
                 <>
                   <Form.Item name="protocol" label="协议" rules={[{ required: true }]}>
                     <Select
-                      disabled
+                      onChange={(protocol) => {
+                        const item = overview?.protocols?.find((p) => p.value === protocol);
+                        if (item) form.setFieldsValue({ chatPath: item.defaultPath, auth: item.defaultAuth });
+                        setResult(null);
+                      }}
                       options={(overview?.protocols || []).map((p) => ({
                         value: p.value,
                         label: `${p.label}${p.jsonMode ? '' : '（无原生 JSON 模式，靠提示词约束）'}`
@@ -281,7 +288,7 @@ export default function LlmSettings() {
                     />
                   </Form.Item>
                   <Form.Item name="auth" label="鉴权方式" rules={[{ required: true }]}>
-                    <Select disabled options={(overview?.auths || []).map((a) => ({
+                    <Select options={(overview?.auths || []).map((a) => ({
                       value: a.value, label: a.label
                     }))} />
                   </Form.Item>

@@ -1049,7 +1049,11 @@ public class OrgService {
         }
         UserContext.checkOrgScope(student.getOrgId());
         UserContext.checkCampusScope(student.getCampusId());
+        UserContext.checkClazzScope(student.getClazzId());
         Clazz clazz = requireClazz(clazzId);
+        if (!java.util.Objects.equals(student.getOrgId(), clazz.getOrgId())) {
+            throw new BizException("转班只能在同一机构内进行，跨机构迁移需同时迁移图谱与学习记录");
+        }
         student.setClazzId(clazz.getId());
         student.setCampusId(clazz.getCampusId());
         studentMapper.updateById(student);

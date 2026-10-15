@@ -54,6 +54,7 @@ public class LearningTaskService {
     private final GraphStore graphStore;
     private final LearningRecordService learningRecordService;
     private final MasteryProfileService masteryProfileService;
+    private final StudentAccessService studentAccessService;
 
     // ==================== 今日学习 ====================
 
@@ -128,6 +129,7 @@ public class LearningTaskService {
 
     /** 掌握度总览，给学生端「我的学习」做进度条 */
     public Map<String, Object> progressOf(Long studentId) {
+        Student student = studentAccessService.requireStudent(studentId);
         StudentGraph sg = studentGraphMapper.selectOne(new LambdaQueryWrapper<StudentGraph>()
                 .eq(StudentGraph::getStudentId, studentId)
                 .orderByDesc(StudentGraph::getId)
@@ -142,11 +144,7 @@ public class LearningTaskService {
             return empty;
         }
         Long graphId = sg.getSourceGraphId();
-        Long orgId = null;
-        var graph = graphStore.findGraph(graphId);
-        if (graph != null) {
-            orgId = graph.getOrgId();
-        }
+        Long orgId = student.getOrgId();
         // 阈值取自机构推荐规则，而不是写死 0.7/0.4 —— 否则管理员把「掌握线」调成 0.8，
         // 这里的「已掌握」计数还是按 0.7 算，页面上会和推荐结果对不上
         RecommendService.Config cfg = recommendService.configOf(orgId);
@@ -314,7 +312,7 @@ public class LearningTaskService {
         }
 
         // 还没做过诊断 → 首条任务就是诊断
-        boolean diagnosed = hasDiagnosis(studentId);
+        boolean diagnosed = diagnosisService.completed(studentId);
         if (!diagnosed) {
             LearningTask task = new LearningTask();
             task.setOrgId(student.getOrgId());
@@ -359,20 +357,22 @@ public class LearningTaskService {
                 continue;
             }
 
-            // 学：先看内容。内容缺失也建任务，学生至少能看到知识点说明
-            LearningTask learn = new LearningTask();
-            learn.setOrgId(student.getOrgId());
-            learn.setStudentId(studentId);
-            learn.setNodeId(rec.nodeId());
-            learn.setType(LearningTask.T_LEARN);
-            learn.setContentId(content == null ? null : content.getId());
-            learn.setTitle("学习「" + rec.nodeName() + "」");
-            learn.setReason(joinReasons(rec));
-            learn.setPriority(priority++);
-            learn.setSource(LearningTask.SRC_SYSTEM);
-            learn.setStatus(LearningTask.S_PENDING);
-            learningTaskMapper.insert(learn);
-            created.add(learn);
+            if ("LEARN".equals(action)) {
+                // 学：先看内容。内容缺失也建任务，学生至少能看到知识点说明
+                LearningTask learn = new LearningTask();
+                learn.setOrgId(student.getOrgId());
+                learn.setStudentId(studentId);
+                learn.setNodeId(rec.nodeId());
+                learn.setType(LearningTask.T_LEARN);
+                learn.setContentId(content == null ? null : content.getId());
+                learn.setTitle("学习「" + rec.nodeName() + "」");
+                learn.setReason(joinReasons(rec));
+                learn.setPriority(priority++);
+                learn.setSource(LearningTask.SRC_SYSTEM);
+                learn.setStatus(LearningTask.S_PENDING);
+                learningTaskMapper.insert(learn);
+                created.add(learn);
+            }
 
             // 练：同一个知识点紧跟着练一手（无论掌握与否，练都能推进 EMA）
             LearningTask practice = new LearningTask();
@@ -381,7 +381,7 @@ public class LearningTaskService {
             practice.setNodeId(rec.nodeId());
             practice.setType(LearningTask.T_PRACTICE);
             practice.setTitle("练习「" + rec.nodeName() + "」");
-            practice.setReason("学完立刻练，把这个知识点固化下来");
+            practice.setReason("LEARN".equals(action) ? "学完立刻练，把这个知识点固化下来" : joinReasons(rec));
             practice.setPriority(priority++);
             practice.setSource(LearningTask.SRC_SYSTEM);
             practice.setStatus(LearningTask.S_PENDING);
@@ -495,16 +495,12 @@ public class LearningTaskService {
             throw new BizException("学习任务不存在: " + taskId);
         }
         UserContext.checkOrgScope(task.getOrgId());
+        studentAccessService.requireStudent(task.getStudentId());
         return task;
     }
 
     private Student requireStudent(Long studentId) {
-        Student student = studentMapper.selectById(studentId);
-        if (student == null) {
-            throw new BizException("学生不存在: " + studentId);
-        }
-        UserContext.checkOrgScope(student.getOrgId());
-        return student;
+        return studentAccessService.requireStudent(studentId);
     }
 
     public Map<String, Object> toView(LearningTask t, Student student) {

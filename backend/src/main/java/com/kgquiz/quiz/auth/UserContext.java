@@ -117,6 +117,9 @@ public final class UserContext {
         if (user.isAdmin() || user.isOrgAdmin()) {
             return null;
         }
+        if (user.isCampusAdmin() && user.campusId() == null) {
+            throw new ForbiddenException("当前校区管理员账号未绑定校区，请联系机构管理员");
+        }
         return user.campusId();
     }
 
@@ -142,7 +145,7 @@ public final class UserContext {
                         ? "当前校区管理员账号未绑定校区，请联系机构管理员重新分配"
                         : "当前教师账号未归属校区，请联系机构管理员");
             }
-            if (targetCampusId != null && !user.campusId().equals(targetCampusId)) {
+            if (!user.campusId().equals(targetCampusId)) {
                 throw new ForbiddenException(user.isCampusAdmin()
                         ? "只能管理自己负责的校区"
                         : "只能操作本校区下的班级");

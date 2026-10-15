@@ -43,6 +43,8 @@ public class AuthInterceptor implements HandlerInterceptor {
         }
         if (required != null && Arrays.stream(required.value())
                 .noneMatch(role -> role == user.role() || user.role().implies(role))) {
+            // preHandle 抛错时 MVC 不会调用本拦截器的 afterCompletion。
+            UserContext.clear();
             String allowed = Arrays.stream(required.value()).map(UserRole::label)
                     .reduce((a, b) -> a + " / " + b).orElse("");
             throw new ForbiddenException("当前为" + user.role().label() + "账号，无权访问该功能（需要" + allowed + "）");

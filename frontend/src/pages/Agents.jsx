@@ -518,13 +518,12 @@ export default function Agents() {
         type="info"
         showIcon
         icon={<SafetyCertificateOutlined />}
-        message="三层边界：工具是代码，编排是数据，权限是运行时算的"
+        message="管理 Agent 可见范围与工具预演"
         description={
           <div style={{ fontSize: 13, lineHeight: 1.7 }}>
-            <div><Tag color="default">工具层</Tag>定义在 <code>AgentToolCatalog</code>，编译期固定，管理台<b>只读</b>。
-              因为工具是带副作用的代码，能不能调取决于实现与后端鉴权，不取决于表里有没有一行。</div>
-            <div><Tag color="orange">编排层</Tag>本页可配：谁、什么提示词、跑哪个模型、挂哪些工具、
-              在<b>哪些校区 / 班级</b>生效。</div>
+            <div><Tag color="default">工具</Tag>可绑定已有工具并查看调用记录；只读工具支持预演。</div>
+            <div><Tag color="orange">配置</Tag>维护名称、目标角色、工具绑定和校区 / 班级可见范围。
+              模型参数为后续 Agent 运行时预留；当前讲解生成使用「大模型接入」中的配置。</div>
             <div><Tag color="cyan">生效范围</Tag>平台 / 机构 / 校区 / 班级四档。
               它只决定「这个 Agent 在哪儿启用」——同样是编排层，<b>不放开任何数据访问</b>。
               越界的校区、班级 id 会被后端直接 403。</div>
@@ -762,7 +761,7 @@ export default function Agents() {
             message="预演不调用大模型、不写任何业务数据"
             description="它回答的是「这个 Agent 以某个人的身份，到底能拿到哪些数据」，而不是「它会怎么回答」。参数按上下文推导：需要知识点的用推荐列表首个，需要关键词的用该知识点名称。" />
           <Space>
-            <Typography.Text>以该学生的身份预演：</Typography.Text>
+            <Typography.Text>选择学习上下文的学生：</Typography.Text>
             <Select style={{ minWidth: 220 }} value={dryStudent} onChange={setDryStudent}
               placeholder="选择学生"
               options={students.map((s) => ({ value: s.id, label: `${s.name}（id=${s.id}）` }))} />

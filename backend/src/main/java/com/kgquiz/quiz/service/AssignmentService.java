@@ -69,6 +69,7 @@ public class AssignmentService {
     private final MasteryService masteryService;
     private final LearningTaskService learningTaskService;
     private final LearningRecordService learningRecordService;
+    private final StudentAccessService studentAccessService;
 
     // ==================== 组卷 ====================
 
@@ -259,6 +260,7 @@ public class AssignmentService {
 
     /** 我的作业：指派给自己、且卷子处于可作答状态的 */
     public List<Map<String, Object>> myAssignments(Long studentId) {
+        studentAccessService.requireStudent(studentId);
         List<ExamAssignment> assignments = assignmentMapper.selectList(
                 new LambdaQueryWrapper<ExamAssignment>()
                         .eq(ExamAssignment::getStudentId, studentId)
@@ -548,6 +550,9 @@ public class AssignmentService {
             }
             BigDecimal fullScore = nz(record.getFullScore());
             BigDecimal score = item.score();
+            if (score == null || score.signum() < 0) {
+                throw new BizException("题目分数不能为负或为空");
+            }
             if (score.compareTo(fullScore) > 0) {
                 throw new BizException("第 " + item.questionId() + " 题分数超过满分 " + fullScore);
             }
@@ -565,6 +570,13 @@ public class AssignmentService {
         }
         assignment.setTotalScore(total.setScale(2, RoundingMode.HALF_UP));
         assignment.setFullScore(full.setScale(2, RoundingMode.HALF_UP));
+        for (AnswerRecord record : records.values()) {
+            Question question = questionMapper.selectById(record.getQuestionId());
+            if (question != null && isSubjective(question.getQuestionType())
+                    && !AnswerRecord.BY_MANUAL.equals(record.getGradedBy())) {
+                throw new BizException("请复核全部主观题后再定稿");
+            }
+        }
         assignment.setPendingCount(0);
         assignment.setStatus(ExamAssignment.ST_GRADED);
         assignment.setGradedAt(LocalDateTime.now());
@@ -580,7 +592,9 @@ public class AssignmentService {
                 delta.put(entry.getKey(), newAvg - oldAvg);
             }
         }
-        Map<Long, MasteryService.MasteryChange> adjustChanges = masteryService.adjustByRateDelta(studentId, delta);
+        Exam gradedExam = examMapper.selectById(examId);
+        Map<Long, MasteryService.MasteryChange> adjustChanges = masteryService.correctExam(studentId, examId,
+                gradedExam != null && Exam.SRC_DIAGNOSIS.equals(gradedExam.getSource()), delta, averageByNode(newRates));
         // 教师改分也要进学习记录：否则学生端时间线只剩机器判分，看不到老师纠正过什么
         for (Map.Entry<Long, MasteryService.MasteryChange> e : adjustChanges.entrySet()) {
             learningRecordService.recordAdjust(studentId, e.getKey(), examId,
@@ -686,6 +700,7 @@ public class AssignmentService {
     }
 
     private ExamAssignment requireAssignment(Long examId, Long studentId) {
+        studentAccessService.requireStudent(studentId);
         ExamAssignment assignment = assignmentMapper.selectOne(new LambdaQueryWrapper<ExamAssignment>()
                 .eq(ExamAssignment::getExamId, examId)
                 .eq(ExamAssignment::getStudentId, studentId)

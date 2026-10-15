@@ -37,8 +37,9 @@ public class LearningRecordController {
     @RequireRole(UserRole.STUDENT)
     public R<List<Map<String, Object>>> mine(@RequestParam(required = false) String action,
                                              @RequestParam(required = false) Long nodeId,
-                                             @RequestParam(required = false) Integer limit) {
-        return R.ok(learningRecordService.timeline(currentStudentId(), action, nodeId, limit));
+                                             @RequestParam(required = false) Integer limit,
+                                             @RequestParam(required = false) Integer days) {
+        return R.ok(learningRecordService.timeline(currentStudentId(), action, nodeId, limit, days));
     }
 
     /** 学生：我的学习统计（默认最近 7 天） */
@@ -54,8 +55,9 @@ public class LearningRecordController {
     public R<List<Map<String, Object>>> ofStudent(@PathVariable Long studentId,
                                                   @RequestParam(required = false) String action,
                                                   @RequestParam(required = false) Long nodeId,
-                                                  @RequestParam(required = false) Integer limit) {
-        return R.ok(learningRecordService.timeline(studentId, action, nodeId, limit));
+                                                  @RequestParam(required = false) Integer limit,
+                                                  @RequestParam(required = false) Integer days) {
+        return R.ok(learningRecordService.timeline(studentId, action, nodeId, limit, days));
     }
 
     /** 教师 / 管理员：某个学生的学习统计 */
