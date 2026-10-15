@@ -190,6 +190,14 @@ start-*.bat    原开发电脑的 Windows 启动脚本
 
 新增 verify-llm.py、verify-agent-scope.py、verify-org-hierarchy.py 及对应 e2e 脚本用于开发验证，依赖项和服务地址请按实际环境调整。solution-cube-line-plane-angle.html 为独立几何讲解示例，可在浏览器打开。
 
+## 学习记录与推荐规则沙盒
+
+新增学习记录流水与掌握度画像，用于追踪学习活动及其带来的掌握度变化。推荐排序结合学习历史、近期重复、遗忘间隔与置信度等因素；学习任务流和出题流程共用推荐规则。
+
+有权限的用户进入「推荐规则」，选择学生和草稿策略／参数，通过沙盒比较草稿与当前生效规则的推荐项及排名变化；模拟不落库，确认后再保存规则。生效规则优先使用本机构默认，否则使用平台默认。「学习记录」按授权范围查看学习过程与掌握度变化。
+
+数据库新增 learning_record 及相关状态、规则字段；升级前备份数据并检查 schema.sql / migration.sql。新增 smoke-recommend.py、verify-recommend.py、e2e-recommend.js 为开发验证脚本，运行前检查服务、账号和演示数据配置。
+
 ---
 
 # English Guide
@@ -363,3 +371,11 @@ Workflow: authorized administrators maintain organizations/campuses/classes, cre
 Database changes include llm_config, organization hierarchy and Agent scope fields. Back up databases and review schema.sql / migration.sql before upgrading. Keep real credentials in deployment environments or a controlled database, never source code, verification reports or Git. Runtime databases are not included in the repository.
 
 verify-llm.py, verify-agent-scope.py, verify-org-hierarchy.py and their e2e counterparts are development checks requiring suitable services and settings. solution-cube-line-plane-angle.html is a standalone geometry explanation example that can be opened in a browser.
+
+## Learning Records and Recommendation Sandbox
+
+New append-only learning records and mastery profiles track learning activities and mastery changes. Recommendation ranking incorporates learning history, recent repetition, forgetting intervals and confidence; task and practice flows share recommendation rules.
+
+Authorized users select a student and draft strategy/parameters in Recommendation Rules, then compare proposed items and ranking changes against the active rule. Simulation does not persist changes: save a rule only after reviewing the result. Organization defaults take precedence over platform defaults. Learning Records exposes activity and mastery changes within the current user's authorized scope.
+
+Database changes include learning_record and associated state/rule fields. Back up data and review schema.sql / migration.sql before upgrading. smoke-recommend.py, verify-recommend.py and e2e-recommend.js are development checks requiring suitable services, accounts and demo data.

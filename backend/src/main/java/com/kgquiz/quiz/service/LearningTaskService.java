@@ -52,6 +52,8 @@ public class LearningTaskService {
     private final StudentGraphMapper studentGraphMapper;
     private final StudentNodeStateMapper studentNodeStateMapper;
     private final GraphStore graphStore;
+    private final LearningRecordService learningRecordService;
+    private final MasteryProfileService masteryProfileService;
 
     // ==================== 今日学习 ====================
 
@@ -130,28 +132,41 @@ public class LearningTaskService {
                 .eq(StudentGraph::getStudentId, studentId)
                 .orderByDesc(StudentGraph::getId)
                 .last("limit 1"));
-        Map<String, Object> m = new LinkedHashMap<>();
         if (sg == null) {
-            m.put("total", 0);
-            m.put("mastered", 0);
-            m.put("weak", 0);
-            m.put("avgMastery", 0);
-            return m;
+            Map<String, Object> empty = new LinkedHashMap<>();
+            empty.put("total", 0);
+            empty.put("mastered", 0);
+            empty.put("weak", 0);
+            empty.put("avgMastery", 0);
+            empty.put("avgEffectiveMastery", 0);
+            return empty;
         }
-        List<StudentNodeState> states = studentNodeStateMapper.selectList(
-                new LambdaQueryWrapper<StudentNodeState>().eq(StudentNodeState::getStudentGraphId, sg.getId()));
-        int total = graphStore.listNodes(sg.getSourceGraphId()).size();
-        long mastered = states.stream()
-                .filter(s -> s.getMastery() != null && s.getMastery().doubleValue() >= 0.7).count();
-        long weak = states.stream()
-                .filter(s -> s.getMastery() != null && s.getMastery().doubleValue() < 0.4).count();
-        double avg = states.stream()
-                .mapToDouble(s -> s.getMastery() == null ? 0 : s.getMastery().doubleValue())
-                .average().orElse(0);
+        Long graphId = sg.getSourceGraphId();
+        Long orgId = null;
+        var graph = graphStore.findGraph(graphId);
+        if (graph != null) {
+            orgId = graph.getOrgId();
+        }
+        // 阈值取自机构推荐规则，而不是写死 0.7/0.4 —— 否则管理员把「掌握线」调成 0.8，
+        // 这里的「已掌握」计数还是按 0.7 算，页面上会和推荐结果对不上
+        RecommendService.Config cfg = recommendService.configOf(orgId);
+        var profiles = masteryProfileService.profiles(studentId, graphId, cfg);
+        int total = profiles.size();
+        long mastered = profiles.values().stream()
+                .filter(p -> p.level() == MasteryProfileService.Level.MASTERED).count();
+        long weak = profiles.values().stream()
+                .filter(p -> p.level() == MasteryProfileService.Level.WEAK).count();
+        double avg = profiles.values().stream().mapToDouble(p -> p.raw()).average().orElse(0);
+        double decayedAvg = profiles.values().stream().mapToDouble(p -> p.decayed()).average().orElse(0);
+
+        Map<String, Object> m = new LinkedHashMap<>();
         m.put("total", total);
         m.put("mastered", mastered);
         m.put("weak", weak);
         m.put("avgMastery", Math.round(avg * 10000) / 10000.0);
+        m.put("avgEffectiveMastery", Math.round(decayedAvg * 10000) / 10000.0);
+        m.put("solidThreshold", cfg.solidThreshold());
+        m.put("weakThreshold", cfg.weakThreshold());
         return m;
     }
 
@@ -237,6 +252,10 @@ public class LearningTaskService {
                 }
                 out.put("contentId", content == null ? null : content.getId());
                 out.put("hasContent", content != null);
+                // 点开讲解即记一次「看了」，这是近期重复惩罚的数据来源：
+                // 学生刚看完的知识点，当天不该又被推到第一位
+                learningRecordService.recordView(task.getStudentId(), task.getNodeId(),
+                        content == null ? null : content.getId(), null, taskId);
             }
             case LearningTask.T_DIAGNOSIS -> {
                 Exam exam = diagnosisService.latestDiagnosis(task.getStudentId());
@@ -320,6 +339,26 @@ public class LearningTaskService {
         int priority = 1;
         for (RecommendService.Recommendation rec : recs) {
             NodeContent content = firstPublishedContent(rec.nodeId());
+            // 任务类型由推荐引擎的 suggestedAction 决定，而不是无条件「学 + 练」：
+            // 已掌握的知识点只排复习，低置信度的先排练习验证缺口。
+            // 「学 + 练」成对生成只适用于推荐建议先学的场景。
+            String action = rec.suggestedAction();
+            if ("REVIEW".equals(action)) {
+                LearningTask review = new LearningTask();
+                review.setOrgId(student.getOrgId());
+                review.setStudentId(studentId);
+                review.setNodeId(rec.nodeId());
+                review.setType(LearningTask.T_REVIEW);
+                review.setTitle("复习「" + rec.nodeName() + "」");
+                review.setReason(joinReasons(rec));
+                review.setPriority(priority++);
+                review.setSource(LearningTask.SRC_SYSTEM);
+                review.setStatus(LearningTask.S_PENDING);
+                learningTaskMapper.insert(review);
+                created.add(review);
+                continue;
+            }
+
             // 学：先看内容。内容缺失也建任务，学生至少能看到知识点说明
             LearningTask learn = new LearningTask();
             learn.setOrgId(student.getOrgId());
@@ -348,22 +387,6 @@ public class LearningTaskService {
             practice.setStatus(LearningTask.S_PENDING);
             learningTaskMapper.insert(practice);
             created.add(practice);
-
-            // 已掌握的顺带安排一次复习（低强度）
-            if ("SOLID".equals(rec.tier())) {
-                LearningTask review = new LearningTask();
-                review.setOrgId(student.getOrgId());
-                review.setStudentId(studentId);
-                review.setNodeId(rec.nodeId());
-                review.setType(LearningTask.T_REVIEW);
-                review.setTitle("复习「" + rec.nodeName() + "」");
-                review.setReason("已掌握，隔一段时间回顾一次防止遗忘");
-                review.setPriority(priority++);
-                review.setSource(LearningTask.SRC_SYSTEM);
-                review.setStatus(LearningTask.S_PENDING);
-                learningTaskMapper.insert(review);
-                created.add(review);
-            }
         }
 
         Map<String, Object> r = new LinkedHashMap<>();
@@ -405,9 +428,15 @@ public class LearningTaskService {
     public Map<String, Object> complete(Long taskId, Long ownerStudentId) {
         LearningTask task = get(taskId);
         checkTaskOwner(task, ownerStudentId);
+        boolean firstTime = !LearningTask.S_DONE.equals(task.getStatus());
         task.setStatus(LearningTask.S_DONE);
         task.setCompletedAt(LocalDateTime.now());
         learningTaskMapper.updateById(task);
+        // 只在首次完成时记一条；反复点「标记完成」不该把学习时长刷上去
+        if (firstTime) {
+            learningRecordService.recordTaskDone(task.getStudentId(), task.getNodeId(),
+                    task.getType(), task.getId(), task.getTitle());
+        }
         Student student = studentMapper.selectById(task.getStudentId());
         return toView(task, student);
     }
@@ -492,10 +521,22 @@ public class LearningTaskService {
                     .eq(StudentGraph::getStudentId, t.getStudentId())
                     .orderByDesc(StudentGraph::getId).last("limit 1"));
             if (sg != null) {
-                StudentNodeState st = studentNodeStateMapper.selectOne(new LambdaQueryWrapper<StudentNodeState>()
-                        .eq(StudentNodeState::getStudentGraphId, sg.getId())
-                        .eq(StudentNodeState::getSourceNodeId, t.getNodeId()));
-                m.put("mastery", st == null ? 0 : st.getMastery());
+                // 用掌握画像而不是裸的 mastery：任务列表要展示的是「现在真实水平」，
+                // 一个三周前考 90% 的知识点，原始值 0.9 但有效值可能只剩 0.6
+                Long orgId = null;
+                var graph = graphStore.findGraph(sg.getSourceGraphId());
+                if (graph != null) {
+                    orgId = graph.getOrgId();
+                }
+                var profile = masteryProfileService.profile(t.getStudentId(), t.getNodeId(),
+                        recommendService.configOf(orgId));
+                m.put("mastery", profile.raw());
+                m.put("effectiveMastery", profile.decayed());
+                m.put("level", profile.level().name());
+                m.put("levelLabel", profile.level().label);
+                m.put("practiceCount", profile.practiceCount());
+                m.put("confidence", Math.round(profile.confidence() * 10000) / 10000.0);
+                m.put("daysSincePractice", profile.daysSince());
             }
         }
         m.put("type", t.getType());

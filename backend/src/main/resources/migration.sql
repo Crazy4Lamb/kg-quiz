@@ -106,3 +106,40 @@ ALTER TABLE agent_profile ADD INDEX idx_scope (org_id, campus_id, clazz_id);
 -- 一层自引用，表达「平行班 / 实验班挂在常规班下」。不支持多深，见 ClazzReq#parentClazzId。
 ALTER TABLE clazz ADD COLUMN parent_clazz_id BIGINT NULL COMMENT '上级班级（自引用，仅一层）';
 ALTER TABLE clazz ADD INDEX idx_parent_clazz (parent_clazz_id);
+
+-- ========== 掌握度置信度 + 学习记录流水 ==========
+-- 1) student_node_state：把「掌握度是多少」升级成「掌握度是多少、有多可信、忘到哪儿了」。
+--    practice_count 决定置信度：练 1 次得 0.9 和练 12 次均分 0.9 完全不同，不能同等推荐。
+--    mastery_peak 给遗忘衰减一个下界锚点，避免衰减把掌握度一路压到 0 造成永久推荐。
+ALTER TABLE student_node_state ADD COLUMN practice_count  INT           NOT NULL DEFAULT 0 COMMENT '累计有效练习次数（置信度分母）';
+ALTER TABLE student_node_state ADD COLUMN last_score_rate DECIMAL(5, 4) NULL COMMENT '最近一次得分率';
+ALTER TABLE student_node_state ADD COLUMN mastery_peak    DECIMAL(5, 4) NOT NULL DEFAULT 0 COMMENT '历史最高掌握度';
+
+-- 2) learning_task 记「该做什么」，learning_record 记「实际做了什么 + 掌握度怎么变的」。
+--    只追加、不覆盖：推荐算法的近期重复惩罚 / 遗忘间隔 / 置信度三个因子都依赖它，
+--    所以它不能像任务那样被「按最新掌握度重排」冲掉。
+CREATE TABLE IF NOT EXISTS learning_record (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    org_id          BIGINT       NOT NULL COMMENT '所属机构（租户）',
+    student_id      BIGINT       NOT NULL COMMENT '学生',
+    node_id         BIGINT       NULL COMMENT '知识点；无知识点级事件（如入学诊断）为空',
+    action          VARCHAR(24)  NOT NULL COMMENT 'VIEW 学讲解 / PRACTICE 做题 / DIAGNOSIS 诊断 / REVIEW 复习 / TASK_DONE 完成任务 / ADJUST 教师改分',
+    ref_type        VARCHAR(16)  NOT NULL DEFAULT '' COMMENT '关联对象类型：TASK/EXAM/CONTENT/ANSWER',
+    ref_id          BIGINT       NULL COMMENT '关联对象 id',
+    task_id         BIGINT       NULL COMMENT '触发本次行为的学习任务（回溯推荐→执行闭环）',
+    score_rate      DECIMAL(5, 4) NULL COMMENT '本次得分率 0-1',
+    duration_sec    INT          NOT NULL DEFAULT 0 COMMENT '本次投入时长（秒）',
+    question_count  INT          NOT NULL DEFAULT 0 COMMENT '本次涉及题目数',
+    mastery_before  DECIMAL(5, 4) NULL COMMENT '行为发生前掌握度',
+    mastery_after   DECIMAL(5, 4) NULL COMMENT '行为发生后掌握度',
+    note            VARCHAR(255) NOT NULL DEFAULT '' COMMENT '备注',
+    created_at      DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    KEY idx_student (student_id, created_at),
+    KEY idx_student_node (student_id, node_id),
+    KEY idx_org (org_id),
+    KEY idx_task (task_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT '知识点学习记录流水（只追加）';
+
+-- 3) 推荐规则从「一条公式」升级为「策略 + 多因子」，strategy 决定因子的组合方式。
+ALTER TABLE recommend_rule ADD COLUMN strategy VARCHAR(24) NOT NULL DEFAULT 'BALANCED'
+    COMMENT '推荐策略：REMEDIATION 补弱优先 / SEQUENTIAL 顺序推进 / EXAM 应试优先 / BALANCED 均衡';

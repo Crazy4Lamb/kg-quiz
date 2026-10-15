@@ -6,7 +6,7 @@ import {
   ApartmentOutlined, SearchOutlined, TeamOutlined, FileTextOutlined, RocketOutlined,
   ReadOutlined, SettingOutlined, LogoutOutlined, UserOutlined, KeyOutlined, DownOutlined,
   BankOutlined, BulbOutlined, SlidersOutlined, AimOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-  RobotOutlined, CloudServerOutlined
+  RobotOutlined, CloudServerOutlined, LineChartOutlined
 } from '@ant-design/icons';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { api, unwrap } from './api.js';
@@ -29,6 +29,7 @@ import ContentManage from './pages/ContentManage.jsx';
 import RecommendRules from './pages/RecommendRules.jsx';
 import Agents from './pages/Agents.jsx';
 import LlmSettings from './pages/LlmSettings.jsx';
+import LearningRecords from './pages/LearningRecords.jsx';
 import ThemePicker from './components/ThemePicker.jsx';
 
 const GraphEditor = lazy(() => import('./pages/GraphEditor.jsx'));
@@ -54,7 +55,11 @@ const MENUS = [
   },
   { key: '/my', icon: <ReadOutlined />, label: '我的学习', roles: [ROLE.STUDENT] },
   { key: '/my/diagnosis', icon: <AimOutlined />, label: '学习诊断', roles: [ROLE.STUDENT] },
-  { key: '/recommend-rules', icon: <SlidersOutlined />, label: '推荐规则', roles: [ROLE.ORG_ADMIN, ROLE.ADMIN] },
+  { key: '/learning-records', icon: <LineChartOutlined />, label: '学习记录',
+    labelByRole: { STUDENT: '我的学习记录' },
+    roles: [ROLE.STUDENT, ROLE.TEACHER, ROLE.CAMPUS_ADMIN, ROLE.ORG_ADMIN, ROLE.ADMIN] },
+  { key: '/recommend-rules', icon: <SlidersOutlined />, label: '推荐配置',
+    roles: [ROLE.TEACHER, ROLE.ORG_ADMIN, ROLE.ADMIN] },
   { key: '/agents', icon: <RobotOutlined />, label: 'Agent 管理', roles: [ROLE.ORG_ADMIN, ROLE.ADMIN] },
   { key: '/llm-settings', icon: <CloudServerOutlined />, label: '大模型接入', roles: [ROLE.ORG_ADMIN, ROLE.ADMIN] },
   { key: '/admin', icon: <SettingOutlined />, label: '系统运维', roles: [ROLE.ADMIN] }
@@ -71,7 +76,8 @@ const TITLES = {
   '/exams': '出题中心',
   '/my': '我的学习',
   '/my/diagnosis': '我的诊断报告',
-  '/recommend-rules': '学习优先级推荐规则',
+  '/recommend-rules': '学习优先级推荐配置',
+  '/learning-records': '学习记录与掌握程度',
   '/agents': 'Agent 管理台',
   '/llm-settings': '大模型接入',
   '/admin': '系统运维'
@@ -87,7 +93,8 @@ const DESCRIPTIONS = {
   '/exams': '用恰到好处的练习，巩固每一个知识点。',
   '/my': '每天前进一点点，今天也有新的收获。',
   '/my/diagnosis': '了解你的学习起点，找到适合自己的节奏。',
-  '/recommend-rules': '为不同的学习起点，安排合适的下一步。',
+  '/recommend-rules': '为不同的学习起点，安排合适的下一步；可沙盒模拟、即时对比。',
+  '/learning-records': '看见每一次练习与掌握度的变化，找出该巩固的地方。',
   '/agents': '把工具、编排与权限分开管，让 Agent 行为可控可查。',
   '/llm-settings': '接哪个模型、什么协议，在管理台点一下即生效。',
   '/admin': '让每一次教与学，都顺畅发生。'
@@ -248,6 +255,7 @@ function Shell({ session, onLogout }) {
                 <Route path="/questions" element={<QuestionList />} />
                 <Route path="/contents" element={<ContentManage />} />
                 <Route path="/recommend-rules" element={<RecommendRules />} />
+                <Route path="/learning-records" element={<LearningRecords />} />
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/llm-settings" element={<LlmSettings />} />
               </>

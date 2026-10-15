@@ -68,6 +68,7 @@ public class AssignmentService {
     private final SysUserMapper sysUserMapper;
     private final MasteryService masteryService;
     private final LearningTaskService learningTaskService;
+    private final LearningRecordService learningRecordService;
 
     // ==================== 组卷 ====================
 
@@ -359,6 +360,7 @@ public class AssignmentService {
         BigDecimal full = BigDecimal.ZERO;
         int pending = 0;
         Map<Long, List<Double>> rateByNode = new HashMap<>();
+        Map<Long, Integer> countByNode = new HashMap<>();
 
         for (ExamQuestion eq : examQuestions) {
             Question question = questionMapper.selectById(eq.getQuestionId());
@@ -391,6 +393,7 @@ public class AssignmentService {
             if (eq.getNodeId() != null && eq.getNodeId() > 0 && nz(question.getScore()).signum() > 0) {
                 double rate = graded.score().doubleValue() / question.getScore().doubleValue();
                 rateByNode.computeIfAbsent(eq.getNodeId(), k -> new ArrayList<>()).add(rate);
+                countByNode.merge(eq.getNodeId(), 1, Integer::sum);
             }
         }
 
@@ -411,11 +414,17 @@ public class AssignmentService {
         Exam submittedExam = examMapper.selectById(examId);
         Map<Long, Double> rateAvg = averageByNode(rateByNode);
         boolean diagnosis = submittedExam != null && Exam.SRC_DIAGNOSIS.equals(submittedExam.getSource());
-        if (diagnosis) {
-            masteryService.initializeMastery(studentId, rateAvg);
-        } else {
-            masteryService.updateMastery(studentId, rateAvg);
-        }
+        Map<Long, MasteryService.MasteryChange> changes = diagnosis
+                ? masteryService.initializeMastery(studentId, rateAvg)
+                : masteryService.updateMastery(studentId, rateAvg);
+
+        // 学习记录：按知识点逐条落库，带掌握度前后快照。
+        // 这是「推荐 → 执行 → 掌握度变化」闭环的最后一段，也是推荐引擎近期重复惩罚的数据来源。
+        learningRecordService.recordPractice(studentId,
+                diagnosis ? com.kgquiz.quiz.entity.LearningRecord.A_DIAGNOSIS
+                        : com.kgquiz.quiz.entity.LearningRecord.A_PRACTICE,
+                examId, examNameOf(submittedExam), rateAvg, changes, countByNode);
+
         // 交卷即收掉对应的学习任务（诊断任务 / 从任务点进来的专项练习）
         int closed = learningTaskService.markTasksDone(studentId, examId,
                 submittedExam == null ? null : submittedExam.getSource());
@@ -571,7 +580,13 @@ public class AssignmentService {
                 delta.put(entry.getKey(), newAvg - oldAvg);
             }
         }
-        masteryService.adjustByRateDelta(studentId, delta);
+        Map<Long, MasteryService.MasteryChange> adjustChanges = masteryService.adjustByRateDelta(studentId, delta);
+        // 教师改分也要进学习记录：否则学生端时间线只剩机器判分，看不到老师纠正过什么
+        for (Map.Entry<Long, MasteryService.MasteryChange> e : adjustChanges.entrySet()) {
+            learningRecordService.recordAdjust(studentId, e.getKey(), examId,
+                    average(newRates.get(e.getKey())), e.getValue(),
+                    "教师批改后修正：" + examNameOf(examMapper.selectById(examId)));
+        }
 
         log.info("教师 {} 批改卷子 #{} 学生 #{}：{} 题，{} -> {} 分", operator.username(),
                 examId, studentId, changed, assignment.getTotalScore(), assignment.getFullScore());
@@ -793,6 +808,17 @@ public class AssignmentService {
         Map<Long, Double> avg = new LinkedHashMap<>();
         rates.forEach((nodeId, list) -> avg.put(nodeId, average(list)));
         return avg;
+    }
+
+    /** 卷子显示名；记录流水要留一句人能读懂的话，纯 id 没有意义 */
+    private static String examNameOf(Exam exam) {
+        if (exam == null) {
+            return "未知卷子";
+        }
+        if (exam.getName() != null && !exam.getName().isBlank()) {
+            return exam.getName();
+        }
+        return Exam.SRC_DIAGNOSIS.equals(exam.getSource()) ? "诊断测评" : "练习 #" + exam.getId();
     }
 
     private double average(List<Double> values) {

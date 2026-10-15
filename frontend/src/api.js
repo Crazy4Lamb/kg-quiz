@@ -175,12 +175,25 @@ export const api = {
   setContentStatus: (id, status) => http.put(`/contents/${id}/status`, { status }),
   deleteContent: (id) => http.delete(`/contents/${id}`),
 
-  // 学习优先级推荐
+  // 学习优先级推荐（规则配置 + 沙盒模拟 + 推荐结果 + 掌握画像）
+  recommendParams: () => http.get('/recommend/params'),
   listRecommendRules: (params) => http.get('/recommend/rules', { params }),
   saveRecommendRule: (data) => http.post('/recommend/rules', data),
   deleteRecommendRule: (id) => http.delete(`/recommend/rules/${id}`),
+  simulateRecommend: (data) => http.post('/recommend/simulate', data),
   recommendPreview: (params) => http.get('/recommend/preview', { params }),
   myRecommend: (params) => http.get('/recommend/my', { params }),
+  studentMastery: (studentId) => http.get(`/recommend/mastery/${studentId}`),
+  myMastery: () => http.get('/recommend/my/mastery'),
+  nodeMastery: (studentId, nodeId) => http.get(`/recommend/mastery/${studentId}/node/${nodeId}`),
+
+  // 知识点学习记录（时间线 / 统计 / 单知识点轨迹）
+  myRecords: (params) => http.get('/learning-records/my', { params }),
+  myRecordStats: (params) => http.get('/learning-records/my/stats', { params }),
+  studentRecords: (studentId, params) => http.get(`/learning-records/student/${studentId}`, { params }),
+  studentRecordStats: (studentId, params) => http.get(`/learning-records/student/${studentId}/stats`, { params }),
+  nodeRecordTimeline: (studentId, nodeId) =>
+    http.get(`/learning-records/student/${studentId}/node/${nodeId}`),
 
   // 学习任务流
   myTasksToday: () => http.get('/tasks/my/today'),

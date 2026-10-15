@@ -88,11 +88,17 @@ CREATE TABLE IF NOT EXISTS student_graph (
     KEY idx_student (student_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT '学生图谱副本（引用模板节点 + 独立掌握度状态）';
 
+-- mastery 是「最近一次测评反映的水平」，practice_count 决定这个数字有多可信：
+-- 只练过 1 次得 0.9 分，和练过 12 次均分 0.9，是完全不同的两件事，不能同等对待。
+-- last_score_rate 用于判断「这次是进步还是退步」，recommend 的遗忘因子靠 last_practiced_at 与它一起算。
 CREATE TABLE IF NOT EXISTS student_node_state (
     id                BIGINT AUTO_INCREMENT PRIMARY KEY,
     student_graph_id  BIGINT        NOT NULL,
     source_node_id    BIGINT        NOT NULL COMMENT '模板节点 id',
     mastery           DECIMAL(5, 4) NOT NULL DEFAULT 0 COMMENT '掌握度 0-1',
+    practice_count    INT           NOT NULL DEFAULT 0 COMMENT '累计有效练习次数（置信度分母）',
+    last_score_rate   DECIMAL(5, 4) NULL COMMENT '最近一次得分率',
+    mastery_peak      DECIMAL(5, 4) NOT NULL DEFAULT 0 COMMENT '历史最高掌握度（遗忘后仍可达的锚点）',
     last_practiced_at DATETIME NULL,
     UNIQUE KEY uk_sg_node (student_graph_id, source_node_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT '学生节点掌握状态';
@@ -234,6 +240,7 @@ CREATE TABLE IF NOT EXISTS recommend_rule (
     id         BIGINT AUTO_INCREMENT PRIMARY KEY,
     org_id     BIGINT      NULL COMMENT '所属机构；NULL 表示平台默认规则',
     name       VARCHAR(64) NOT NULL COMMENT '规则名称',
+    strategy   VARCHAR(24) NOT NULL DEFAULT 'BALANCED' COMMENT '推荐策略：REMEDIATION 补弱优先 / SEQUENTIAL 顺序推进 / EXAM 应试优先 / BALANCED 均衡',
     is_default TINYINT     NOT NULL DEFAULT 0 COMMENT '1 = 该机构默认规则',
     enabled    TINYINT     NOT NULL DEFAULT 1 COMMENT '1 启用 / 0 停用',
     config     TEXT        NOT NULL COMMENT '权重与阈值 JSON',
@@ -264,6 +271,35 @@ CREATE TABLE IF NOT EXISTS learning_task (
     KEY idx_student (student_id),
     KEY idx_student_status (student_id, status)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT '学习任务流';
+
+-- ========== 学习记录（知识点层面的行为流水）============
+-- learning_task 记的是「该做什么」，learning_record 记的是「实际做了什么、产生了什么变化」。
+-- 两者的区别是前者可被重排覆盖，后者只追加不改写 —— 推荐算法的「近期重复惩罚」「遗忘间隔」
+-- 「置信度」三个因子全部依赖这张表，所以它不能被任务重排冲掉。
+--
+-- 每次写记录都带 mastery_before / mastery_after，形成掌握度变化轨迹，
+-- 教师端「这个孩子是怎么一步步变成现在这样的」才有据可查。
+CREATE TABLE IF NOT EXISTS learning_record (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    org_id          BIGINT       NOT NULL COMMENT '所属机构（租户）',
+    student_id      BIGINT       NOT NULL COMMENT '学生',
+    node_id         BIGINT       NULL COMMENT '知识点；无知识点级事件（如入学诊断）为空',
+    action          VARCHAR(24)  NOT NULL COMMENT 'VIEW 学讲解 / PRACTICE 做题 / DIAGNOSIS 诊断 / REVIEW 复习 / TASK_DONE 完成任务 / ADJUST 教师改分',
+    ref_type        VARCHAR(16)  NOT NULL DEFAULT '' COMMENT '关联对象类型：TASK/EXAM/CONTENT/ANSWER',
+    ref_id          BIGINT       NULL COMMENT '关联对象 id（任务 id / 卷子 id / 内容 id）',
+    task_id         BIGINT       NULL COMMENT '触发本次行为的学习任务（能回溯「推荐 → 执行」闭环）',
+    score_rate      DECIMAL(5, 4) NULL COMMENT '本次得分率 0-1',
+    duration_sec    INT          NOT NULL DEFAULT 0 COMMENT '本次投入时长（秒）',
+    question_count  INT          NOT NULL DEFAULT 0 COMMENT '本次涉及题目数',
+    mastery_before  DECIMAL(5, 4) NULL COMMENT '行为发生前掌握度',
+    mastery_after   DECIMAL(5, 4) NULL COMMENT '行为发生后掌握度',
+    note            VARCHAR(255) NOT NULL DEFAULT '' COMMENT '备注（卷子名 / 判分说明）',
+    created_at      DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    KEY idx_student (student_id, created_at),
+    KEY idx_student_node (student_id, node_id),
+    KEY idx_org (org_id),
+    KEY idx_task (task_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT '知识点学习记录流水（只追加）';
 
 CREATE TABLE IF NOT EXISTS sys_token (
     id         BIGINT AUTO_INCREMENT PRIMARY KEY,

@@ -173,3 +173,11 @@ Workflow: authorized administrators maintain organizations/campuses/classes, cre
 Database changes include llm_config, organization hierarchy and Agent scope fields. Back up databases and review schema.sql / migration.sql before upgrading. Keep real credentials in deployment environments or a controlled database, never source code, verification reports or Git. Runtime databases are not included in the repository.
 
 verify-llm.py, verify-agent-scope.py, verify-org-hierarchy.py and their e2e counterparts are development checks requiring suitable services and settings. solution-cube-line-plane-angle.html is a standalone geometry explanation example that can be opened in a browser.
+
+## Learning Records and Recommendation Sandbox
+
+New append-only learning records and mastery profiles track learning activities and mastery changes. Recommendation ranking incorporates learning history, recent repetition, forgetting intervals and confidence; task and practice flows share recommendation rules.
+
+Authorized users select a student and draft strategy/parameters in Recommendation Rules, then compare proposed items and ranking changes against the active rule. Simulation does not persist changes: save a rule only after reviewing the result. Organization defaults take precedence over platform defaults. Learning Records exposes activity and mastery changes within the current user's authorized scope.
+
+Database changes include learning_record and associated state/rule fields. Back up data and review schema.sql / migration.sql before upgrading. smoke-recommend.py, verify-recommend.py and e2e-recommend.js are development checks requiring suitable services, accounts and demo data.

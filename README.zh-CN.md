@@ -174,3 +174,11 @@ start-*.bat    原开发电脑的 Windows 启动脚本
 迁移涉及 llm_config、组织层级和 Agent 范围字段，升级前备份数据库并检查 schema.sql / migration.sql。真实密钥只应放在部署环境或受控数据库，不应写进源码、验证记录或 Git；仓库不包含运行数据库。
 
 新增 verify-llm.py、verify-agent-scope.py、verify-org-hierarchy.py 及对应 e2e 脚本用于开发验证，依赖项和服务地址请按实际环境调整。solution-cube-line-plane-angle.html 为独立几何讲解示例，可在浏览器打开。
+
+## 学习记录与推荐规则沙盒
+
+新增学习记录流水与掌握度画像，用于追踪学习活动及其带来的掌握度变化。推荐排序结合学习历史、近期重复、遗忘间隔与置信度等因素；学习任务流和出题流程共用推荐规则。
+
+有权限的用户进入「推荐规则」，选择学生和草稿策略／参数，通过沙盒比较草稿与当前生效规则的推荐项及排名变化；模拟不落库，确认后再保存规则。生效规则优先使用本机构默认，否则使用平台默认。「学习记录」按授权范围查看学习过程与掌握度变化。
+
+数据库新增 learning_record 及相关状态、规则字段；升级前备份数据并检查 schema.sql / migration.sql。新增 smoke-recommend.py、verify-recommend.py、e2e-recommend.js 为开发验证脚本，运行前检查服务、账号和演示数据配置。
